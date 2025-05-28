@@ -154,10 +154,47 @@ def extract_query_from_response(response: str) -> str:
     if "<query>" in response and "</query>" in response:
         start = response.find("<query>") + 7
         end = response.find("</query>")
-        return response[start:end].strip()
+        extracted_query = response[start:end].strip()
+        
+        # Additional cleaning: remove any remaining XML-like tags or thinking content
+        lines = extracted_query.split('\n')
+        clean_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            # Skip empty lines and lines that look like XML tags or thinking content
+            if (line and 
+                not line.startswith('<') and 
+                not line.endswith('>') and
+                not line.startswith('tags.') and
+                not line.startswith('</think>')):
+                clean_lines.append(line)
+        
+        if clean_lines:
+            return '\n'.join(clean_lines)
+        else:
+            # If no clean lines found, return the original extracted content
+            return extracted_query
     
     # If no tags found, return the whole response (might be just the query)
-    return response.strip()
+    # But clean it up first
+    lines = response.strip().split('\n')
+    clean_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        # Skip lines that look like XML tags or thinking content
+        if (line and 
+            not line.startswith('<') and 
+            not line.endswith('>') and
+            not line.startswith('tags.') and
+            not line.startswith('</think>')):
+            clean_lines.append(line)
+    
+    if clean_lines:
+        return '\n'.join(clean_lines)
+    else:
+        return response.strip()
 
 def load_golden_dataset(file_path: str) -> Optional[Dict[str, Any]]:
     """Load a golden dataset from JSON file."""
@@ -507,26 +544,41 @@ def generate_queries_from_descriptions(
                         )
                         
                         if semantic_eval_result:
-                            if semantic_eval_result["exact_match"]:
+                            # Check if semantic evaluation was successful (has the required keys)
+                            if semantic_eval_result.get("exact_match") is True:
                                 console.print(Panel(
                                     Text("✓ Semantic evaluation: Exact match with golden dataset", style="bold green"),
                                     title="Semantic Evaluation",
                                     border_style="green",
-                                    subtitle=f"Took {semantic_eval_result['execution_time']:.3f}s"
+                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
                                 ))
-                            elif semantic_eval_result["similarity_score"] > 0.8:
+                            elif semantic_eval_result.get("similarity_score", 0) > 0.8:
                                 console.print(Panel(
-                                    Text(f"✓ Semantic evaluation: High similarity ({semantic_eval_result['similarity_score']:.2f})", style="bold yellow"),
+                                    Text(f"✓ Semantic evaluation: High similarity ({semantic_eval_result.get('similarity_score', 0):.2f})", style="bold yellow"),
                                     title="Semantic Evaluation",
                                     border_style="yellow",
-                                    subtitle=f"Took {semantic_eval_result['execution_time']:.3f}s"
+                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
+                                ))
+                            elif semantic_eval_result.get("similarity_score", 0) > 0:
+                                console.print(Panel(
+                                    Text(f"✗ Semantic evaluation: Low similarity ({semantic_eval_result.get('similarity_score', 0):.2f})", style="bold red"),
+                                    title="Semantic Evaluation",
+                                    border_style="red",
+                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
+                                ))
+                            elif semantic_eval_result.get("error"):
+                                console.print(Panel(
+                                    Text(f"✗ Semantic evaluation failed: {semantic_eval_result.get('error')}", style="bold red"),
+                                    title="Semantic Evaluation Error",
+                                    border_style="red",
+                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
                                 ))
                             else:
                                 console.print(Panel(
-                                    Text(f"✗ Semantic evaluation: Low similarity ({semantic_eval_result['similarity_score']:.2f})", style="bold red"),
+                                    Text("✗ Semantic evaluation: Unknown result", style="bold red"),
                                     title="Semantic Evaluation",
                                     border_style="red",
-                                    subtitle=f"Took {semantic_eval_result['execution_time']:.3f}s"
+                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
                                 ))
                     
                     query_result = {
