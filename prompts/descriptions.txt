@@ -1,4 +1,4 @@
-Find all kerberoastable users on the domain
+Find all kerberoastable users
 Identify users with active sessions on more than 5 machines (potential lateral movement)
 List users who joined or left more than 3 groups in the past 30 days (group churn analysis)
 Find users recently granted administrative access (past 7 days)
