@@ -21,8 +21,8 @@
   },
   {
     "description": "Find Kerberoastable users with a path to Domain Admins",
-    "query": "MATCH (u:User {hasspn:true}) MATCH (g:Group) WHERE g.name CONTAINS 'DOMAIN ADMINS' MATCH p = shortestPath((u)-[*1..]->(g)) RETURN p",
-    "source": "https://hausec.com/2019/09/09/bloodhound-cypher-cheatsheet/"
+    "query": "MATCH (u:User {hasspn:true}), (g:Group) WHERE g.name CONTAINS 'DOMAIN ADMINS' WITH u, g MATCH p = shortestPath((u)-[*1..]->(g)) RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Find workstations a user can RDP into",
@@ -61,8 +61,8 @@
   },
   {
     "description": "Find all sessions any user in a specific domain has",
-    "query": "MATCH p=(m:Computer)-[r:HasSession]->(n:User {domain: 'TEST.LOCAL'}) RETURN p",
-    "source": "https://hausec.com/2019/09/09/bloodhound-cypher-cheatsheet/"
+    "query": "MATCH p=(m:Computer)-[r:HasSession]->(n:User) WHERE n.domain IS NOT NULL RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "View all Group Policy Objects (GPOs)",
@@ -206,8 +206,8 @@
   },
   {
     "description": "Find all Kerberoastable users with the path to Domain Admins",
-    "query": "MATCH (u:User {hasspn:true}) MATCH (g:Group) WHERE g.name CONTAINS 'DOMAIN ADMINS' MATCH p = shortestPath( (u)-[*1..]->(g) ) RETURN p",
-    "source": "https://redfoxsec.com/blog/bloodhound-cheat-sheet/"
+    "query": "MATCH (u:User {hasspn:true}), (g:Group) WHERE g.name CONTAINS 'DOMAIN ADMINS' WITH u, g MATCH p = shortestPath((u)-[*1..]->(g)) RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Find all computers domain users can RDP to",
@@ -227,11 +227,6 @@
   {
     "description": "Find non-Tier Zero principals with ADCSESCx edges to Tier Zero ADCS templates",
     "query": "MATCH p = \n(n)-[:ADCSESC1|ADCSESC3|ADCSESC4|ADCSESC6a|ADCSESC6b|ADCSESC9a|ADCSESC9b|ADCSESC10a|ADCSESC10b|ADCSESC13]->(m)\nWHERE \"admin_tier_0\" IN split(m.system_tags, ' ')\nAND (n.system_tags IS NULL OR NOT \"admin_tier_0\" IN split(n.system_tags, ' '))\nRETURN p",
-    "source": "https://troopers.de/downloads/troopers24/TR24_Analyzing_and_Executing_ADCS_KZYMD8.pdf"
-  },
-  {
-    "description": "Find non-Tier Zero principals with ADCS permissions under PKI containers",
-    "query": "MATCH \n(c:Container)-[:Contains*0..]->(pkiobject)\nWHERE c.name STARTS WITH \"PUBLIC KEY SERVICES\"\nMATCH p = (pkiobject)<-[r]-(x)\nWHERE (\nx.system_tags IS NULL\nOR NOT \"admin_tier_0\" IN split(x.system_tags, ' ')\n)\nAND (x:User OR x:Computer OR x:Group)\nAND type(r) <> 'Enroll'\nRETURN p",
     "source": "https://troopers.de/downloads/troopers24/TR24_Analyzing_and_Executing_ADCS_KZYMD8.pdf"
   },
   {
@@ -255,11 +250,6 @@
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
   },
   {
-    "description": "Return All Azure Users and their Groups (Warning: Heavy)",
-    "query": "MATCH p=(m:AZUser)-[r:AZMemberOf*1..]->(n) WHERE NOT m.objectid CONTAINS 'S-1-5' RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
-  },
-  {
     "description": "Return GUEST Azure Users and their Groups",
     "query": "MATCH p=(m:AZUser)-[r:AZMemberOf*1..]->(n) WHERE NOT m.objectid CONTAINS 'S-1-5' AND m.userprincipalname=~ '(?i).*#EXT#.*' RETURN p",
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
@@ -267,11 +257,6 @@
   {
     "description": "Return All Azure Users and their Admin Roles",
     "query": "MATCH p=(n)-[:AZHasRole|AZMemberOf*1..]->(:AZRole) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
-  },
-  {
-    "description": "Return All Azure Users and their owned Devices (Warning: Heavy)",
-    "query": "MATCH p=(d:AZDevice)<-[r1:AZOwns]->(m:AZUser) RETURN p",
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
   },
   {
@@ -321,13 +306,13 @@
   },
   {
     "description": "Show Enrollment Rights for Certificate Template",
-    "query": "MATCH p=(g)-[:Enroll|AutoEnroll]->(n:GPO {name:$result}) WHERE n.type = 'Certificate Template' return p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH p=(g)-[:Enroll|AutoEnroll]->(n:GPO) WHERE n.type = 'Certificate Template' return p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Show Rights for Certificate Authority",
-    "query": "MATCH p=(g)-[:ManageCa|ManageCertificates|Auditor|Operator|Read|Enroll]->(n:GPO {name:$result}) return p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH p=(g)-[:ManageCa|ManageCertificates|Auditor|Operator|Read|Enroll]->(n:GPO) WHERE n.type = 'Enrollment Service' return p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Find Misconfigured Certificate Templates (ESC1)",
@@ -446,8 +431,8 @@
   },
   {
     "description": "Kerberoastable Admins",
-    "query": "MATCH (n:Group) WHERE n.objectsid =~ $sid WITH n MATCH p=(n)<-[MemberOf*1..]-(m {hasspn: true}) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH (n:Group) WHERE n.objectsid ENDS WITH '-512' WITH n MATCH p=(n)<-[:MemberOf*1..]-(m {hasspn: true}) RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "All Kerberoastable Users",
@@ -481,13 +466,13 @@
   },
   {
     "description": "Find owned Domain Admins",
-    "query": "MATCH (n:Group) WHERE n.name =~ $name AND n.owned=true WITH n MATCH p=(n)<-[r:MemberOf*1..]-(m) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH (n:Group) WHERE n.name CONTAINS 'DOMAIN ADMINS' AND n.owned=true WITH n MATCH p=(n)<-[r:MemberOf*1..]-(m) RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Find Shortest Path from owned Node to Domain Admin",
-    "query": "MATCH (n:User),(m:Group {name:$result}),p=shortestPath((n {owned:true})-[r:MemberOf|AdminTo|HasSession|Contains|GpLink|Owns|DCSync|AllExtendedRights|ForceChangePassword|GenericAll|GenericWrite|WriteDacl|WriteOwner*1..]->(m)) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH (n:User {owned:true}), (m:Group) WHERE m.name CONTAINS 'DOMAIN ADMINS' WITH n, m MATCH p=shortestPath((n)-[r:MemberOf|AdminTo|HasSession|Contains|GpLink|Owns|DCSync|AllExtendedRights|ForceChangePassword|GenericAll|GenericWrite|WriteDacl|WriteOwner*1..]->(m)) RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Shortest paths from owned objects to High Value Targets (5 hops)",
@@ -517,11 +502,6 @@
   {
     "description": "Unconstrained Delegation systems (without domain controllers)",
     "query": "MATCH (c1:Computer)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-516' WITH COLLECT(c1.name) AS domainControllers MATCH (c2 {unconstraineddelegation:true}) WHERE NOT c2.name IN domainControllers RETURN c2",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
-  },
-  {
-    "description": "(Warning: edits the DB) Mark unconstrained delegation systems as high value targets",
-    "query": "MATCH (c1:Computer)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-516' WITH COLLECT(c1.name) AS domainControllers MATCH (c2 {unconstraineddelegation:true}) WHERE NOT c2.name IN domainControllers SET c2.highvalue = true RETURN c2",
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
   },
   {
@@ -596,18 +576,8 @@
   },
   {
     "description": "Groups with Computer and User Objects",
-    "query": "MATCH (c:Computer)-[r:MemberOf*1..]->(groupsWithComps:Group) WITH groupsWithComps MATCH (u:User)-[r:MemberOf*1..]->(groupsWithComps) RETURN DISTINCT(groupsWithComps) as groupsWithCompsAndUsers",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
-  },
-  {
-    "description": "Groups that can reset passwords (Warning: Heavy)",
-    "query": "MATCH p=(m:Group)-[r:ForceChangePassword]->(n:User) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
-  },
-  {
-    "description": "Groups that have local admin rights (Warning: Heavy)",
-    "query": "MATCH p=(m:Group)-[r:AdminTo]->(n:Computer) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH (c:Computer)-[r:MemberOf*1..]->(groupsWithComps:Group) WITH groupsWithComps MATCH (u:User)-[r:MemberOf*1..]->(groupsWithComps) RETURN DISTINCT groupsWithComps as groupsWithCompsAndUsers",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Users never logged on and account still active",
@@ -691,8 +661,8 @@
   },
   {
     "description": "Find Kerberoastable Users with a path to DA",
-    "query": "MATCH (u:User {hasspn:true}) MATCH (g:Group) WHERE g.objectid ENDS WITH '-512' MATCH p = shortestPath( (u)-[*1..]->(g) ) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH (u:User {hasspn:true}), (g:Group) WHERE g.objectid ENDS WITH '-512' WITH u, g MATCH p = shortestPath((u)-[*1..]->(g)) RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Find machines Domain Users can RDP into",
@@ -702,16 +672,6 @@
   {
     "description": "Find what groups can RDP",
     "query": "MATCH p=(m:Group)-[r:CanRDP]->(n:Computer) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
-  },
-  {
-    "description": "Find all users that have local admin rights (Warning Can Be Heavy)",
-    "query": "MATCH p=(m:User)-[r:AdminTo]->(n:Computer) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
-  },
-  {
-    "description": "Find all users that have local admin rights or Groups (Warning Can Be Heavy)",
-    "query": "MATCH p=(m:User)-[r:AdminTo|MemberOf*1..]->(n:Computer) RETURN p",
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
   },
   {
@@ -735,7 +695,7 @@
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
   },
   {
-    "description": "Find computers that allow unconstrained delegation that AREN’T domain controllers.",
+    "description": "Find computers that allow unconstrained delegation that AREN'T domain controllers.",
     "query": "MATCH (c1:Computer)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-516' WITH COLLECT(c1.name) AS domainControllers MATCH (c2:Computer {unconstraineddelegation:true}) WHERE NOT c2.name IN domainControllers RETURN c2",
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
   },
@@ -770,24 +730,19 @@
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
   },
   {
-    "description": "Find if any domain user has interesting permissions against a GPO (Warning: Heavy)",
-    "query": "MATCH p=(u:User)-[r:AllExtendedRights|GenericAll|GenericWrite|Owns|WriteDacl|WriteOwner|GpLink*1..]->(g:GPO) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
-  },
-  {
     "description": "Find an object in one domain that can do something to a foreign object",
     "query": "MATCH p=(n)-[r]->(m) WHERE NOT n.domain = m.domain RETURN p",
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
   },
   {
     "description": "Find all sessions a user in a specific domain has",
-    "query": "MATCH p=(m:Computer)-[r:HasSession]->(n:User {domain:$result}) RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH p=(m:Computer)-[r:HasSession]->(n:User) WHERE n.domain IS NOT NULL RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Find an object from domain 'A' that can do anything to a foreign object",
-    "query": "MATCH p=(n {domain:$result})-[r]->(d) WHERE NOT d.domain=n.domain RETURN p",
-    "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+    "query": "MATCH p=(n)-[r]->(d) WHERE NOT d.domain=n.domain AND n.domain IS NOT NULL AND d.domain IS NOT NULL RETURN p",
+    "source": "@joshtmerrill"
   },
   {
     "description": "Find All edges any owned user has on a computer",
@@ -913,5 +868,35 @@
     "description": "Search for key words in users title such as scientist or Executive - tweak as required",
     "query": "MATCH p = (d:Domain)-[r:Contains*1..]->(u:User) WHERE u.title =~ '(?i).*scientist*' AND u.enabled = true RETURN p",
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+  },
+  {
+    "description": "Find OU issues related to the new dMSA attack (may need updates)",
+    "query": "MATCH (u:User)-[r:GenericAll|GenericWrite|WriteOwner|WriteDacl|WriteProperty|CreateChild]->(o:OU) RETURN u, r, o",
+    "source": "@knavesec"
+  },
+  {
+    "description": "Find single hop low privilege group rights",
+    "query": "MATCH (g:Group) WHERE g.objectid ENDS WITH '-S-1-1-0' OR g.objectid ENDS WITH '-S-1-5-11' OR g.objectid ENDS WITH '-513' OR g.objectid ENDS WITH '-515' OR g.objectid ENDS WITH '-S-1-5-32-545' OR g.objectid ENDS WITH '-S-1-5-32-554' MATCH p=(g)-[r]->(n) WHERE n<>g AND NOT type(r)='MemberOf' RETURN DISTINCT p",
+    "source": "@knavesec"
+  },
+  {
+    "description": "Find multi hop low privilege group rights (up to 6 hops)",
+    "query": "MATCH (g:Group) WHERE g.objectid ENDS WITH '-S-1-1-0' OR g.objectid ENDS WITH '-S-1-5-11' OR g.objectid ENDS WITH '-513' OR g.objectid ENDS WITH '-515' OR g.objectid ENDS WITH '-S-1-5-32-545' OR g.objectid ENDS WITH '-S-1-5-32-554' MATCH p=(g)-[r1:MemberOf*1..6]->(g2:Group)-[r2]->(n) WHERE n<>g AND g<>g2 AND NOT type(r2)='MemberOf' AND NOT (g2.objectid ENDS WITH '-S-1-1-0' OR g2.objectid ENDS WITH '-S-1-5-11' OR g2.objectid ENDS WITH '-513' OR g2.objectid ENDS WITH '-515' OR g2.objectid ENDS WITH '-S-1-5-32-545' OR g2.objectid ENDS WITH '-S-1-5-32-554') RETURN DISTINCT p",
+    "source": "@knavesec"
+  },
+  {
+    "description": "Show Enrollment Rights for Certificate Template",
+    "query": "MATCH p=(g)-[:Enroll|AutoEnroll]->(n:GPO) WHERE n.type = 'Certificate Template' return p",
+    "source": "@joshtmerrill"
+  },
+  {
+    "description": "Show Rights for Certificate Authority",
+    "query": "MATCH p=(g)-[:ManageCa|ManageCertificates|Auditor|Operator|Read|Enroll]->(n:GPO) WHERE n.type = 'Enrollment Service' return p",
+    "source": "@joshtmerrill"
+  },
+  {
+    "description": "Find unconstrained delegation systems that are not domain controllers",
+    "query": "MATCH (c1:Computer)-[:MemberOf*1..]->(g:Group) WHERE g.objectid ENDS WITH '-516' WITH COLLECT(c1.name) AS domainControllers MATCH (c2 {unconstraineddelegation:true}) WHERE NOT c2.name IN domainControllers RETURN c2",
+    "source": "@joshtmerrill"
   }
 ]
