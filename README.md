@@ -16,6 +16,13 @@ A comprehensive toolkit for evaluating and validating Cypher queries against Blo
 - **Error Classification**: Distinguish between syntax errors, execution errors, and empty results
 - **Rate Limiting**: Configurable delays between queries to prevent API overload
 
+### 🤖 **LLM Query Generation**
+- **AI-Powered Query Creation**: Generate Cypher queries from natural language descriptions using LLMs
+- **Multiple LLM Providers**: Support for OpenAI GPT models (extensible to other providers)
+- **Automatic Validation**: Built-in syntax validation of generated queries
+- **Evaluation Metrics**: Track generation success rates and syntax validity
+- **Batch Processing**: Generate queries for entire description datasets
+
 ### 📁 **Data Management**
 - **Query Dataset**: Curated collection of BloodHound Cypher queries with descriptions
 - **Failed Query Tracking**: Automatic saving of failed queries with error details
@@ -50,9 +57,15 @@ A comprehensive toolkit for evaluating and validating Cypher queries against Blo
    BHE_TOKEN_ID=your-token-id
    BHE_TOKEN_KEY=your-token-key
    
+   # LLM API Configuration (for query generation)
+   OPENAI_API_KEY=your-openai-api-key
+   OPENAI_MODEL=gpt-4
+   OPENAI_BASE_URL=https://api.openai.com/v1
+   
    # Optional Configuration
    QUERY_DELAY_SECONDS=0.5
    ENABLE_PRE_VALIDATION=true
+   REQUEST_DELAY_SECONDS=1.0
    ```
 
 ## Usage
@@ -61,12 +74,17 @@ A comprehensive toolkit for evaluating and validating Cypher queries against Blo
 
 **Validate all queries (syntax only)**:
 ```bash
-python evals/cypher_syntax_validator.py
+python evals/validate_cypher_syntax.py
 ```
 
 **Run full evaluation against BloodHound**:
 ```bash
-python evals/cypher_query_evaluator.py
+python evals/make_bh_queries.py
+```
+
+**Generate queries using LLM**:
+```bash
+python evals/llm_query_generation.py
 ```
 
 ### 📋 **Detailed Usage**
@@ -75,24 +93,24 @@ python evals/cypher_query_evaluator.py
 
 ```bash
 # Validate entire dataset with summary
-python evals/cypher_syntax_validator.py
+python evals/validate_cypher_syntax.py
 
 # Validate with detailed output for each query
-python evals/cypher_syntax_validator.py --verbose
+python evals/validate_cypher_syntax.py --verbose
 
 # Validate a single query
-python evals/cypher_syntax_validator.py --query "MATCH (n:User) RETURN n"
+python evals/validate_cypher_syntax.py --query "MATCH (n:User) RETURN n"
 
 # Validate custom queries file
-python evals/cypher_syntax_validator.py --file /path/to/custom_queries.json
+python evals/validate_cypher_syntax.py --file /path/to/custom_queries.json
 
 # Skip saving failed queries to file
-python evals/cypher_syntax_validator.py --no-save
+python evals/validate_cypher_syntax.py --no-save
 ```
 
 #### **Full Query Evaluation**
 
-The main evaluator (`cypher_query_evaluator.py`) automatically includes syntax pre-validation when `ENABLE_PRE_VALIDATION=true` in your `.env` file.
+The main evaluator (`make_bh_queries.py`) automatically includes syntax pre-validation when `ENABLE_PRE_VALIDATION=true` in your `.env` file.
 
 **Features**:
 - ✅ Pre-execution syntax validation (optional)
@@ -100,6 +118,35 @@ The main evaluator (`cypher_query_evaluator.py`) automatically includes syntax p
 - ✅ Comprehensive error handling and classification
 - ✅ Performance metrics and timing statistics
 - ✅ Automatic report generation
+
+#### **LLM Query Generation**
+
+Generate Cypher queries from natural language descriptions using AI:
+
+```bash
+# Generate queries using OpenAI GPT-4 (default)
+python evals/llm_query_generation.py
+
+# Generate without syntax validation
+python evals/llm_query_generation.py --no-validate
+
+# Use custom description and prompt files
+python evals/llm_query_generation.py --descriptions /path/to/descriptions.txt --system-prompt /path/to/prompt.txt
+
+# Don't save results to files
+python evals/llm_query_generation.py --no-save
+
+# Use different LLM provider (when available)
+python evals/llm_query_generation.py --provider openai
+```
+
+**LLM Generation Features**:
+- 🤖 Automatic query generation from descriptions
+- ✅ Built-in syntax validation of generated queries
+- 📊 Comprehensive generation statistics
+- 💾 Saves both raw results and valid queries
+- 🔄 Rate limiting to respect API limits
+- 🎨 Beautiful console output with progress tracking
 
 #### **Programmatic Usage**
 
@@ -154,6 +201,22 @@ results = validate_query_batch(queries)
 └────────────────────────────┴──────────┴─────────────┘
 ```
 
+### **LLM Generation Results**
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ Metric                     ┃    Count ┃ Percentage ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ Total Descriptions         │       31 │      100.0% │
+│ Successful Generations     │       30 │       96.8% │
+│ Generation Errors          │        1 │        3.2% │
+│ Syntax Valid Queries       │       28 │       93.3% │
+│ Syntax Invalid Queries     │        2 │        6.7% │
+│ Syntax Success Rate        │          │       93.3% │
+│ Total Runtime              │  45.2s   │             │
+│ Average Time per Query     │   1.5s   │             │
+└────────────────────────────┴──────────┴─────────────┘
+```
+
 ## Configuration Options
 
 ### **Environment Variables**
@@ -167,6 +230,10 @@ results = validate_query_batch(queries)
 | `BHE_TOKEN_KEY` | - | API token key (required) |
 | `QUERY_DELAY_SECONDS` | `0.5` | Delay between queries |
 | `ENABLE_PRE_VALIDATION` | `true` | Enable syntax pre-validation |
+| `OPENAI_API_KEY` | - | OpenAI API key (for LLM generation) |
+| `OPENAI_MODEL` | `gpt-4` | OpenAI model to use |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI API base URL |
+| `REQUEST_DELAY_SECONDS` | `1.0` | Delay between LLM requests |
 
 ### **Query Dataset Format**
 
@@ -189,6 +256,8 @@ The `data/queries.json` file should contain an array of query objects:
 - `failed_queries_YYYY-MM-DD_HH-MM-SS.json` - Execution failures
 - `syntax_failed_queries_YYYY-MM-DD_HH-MM-SS.json` - Syntax validation failures  
 - `syntax_validation_failures_YYYY-MM-DD_HH-MM-SS.json` - Standalone validation failures
+- `llm_generation_results_YYYY-MM-DD_HH-MM-SS.json` - Complete LLM generation results
+- `llm_generated_queries_YYYY-MM-DD_HH-MM-SS.json` - Valid queries from LLM generation
 
 ### **Report Structure**
 
@@ -210,6 +279,36 @@ The `data/queries.json` file should contain an array of query objects:
 }
 ```
 
+### **LLM Generation Report Structure**
+
+```json
+{
+  "evaluation_timestamp": "2024-01-15T10:30:00",
+  "llm_provider": "openai",
+  "llm_model": "gpt-4",
+  "total_descriptions": 31,
+  "successful_generations": 30,
+  "generation_errors": 1,
+  "syntax_validation_enabled": true,
+  "syntax_valid_queries": 28,
+  "syntax_invalid_queries": 2,
+  "total_runtime": 45.2,
+  "generated_queries": [
+    {
+      "description_number": 1,
+      "description": "Find all users with SPN",
+      "raw_response": "<query>MATCH (n:User) WHERE n.hasspn=true RETURN n</query>",
+      "generated_query": "MATCH (n:User) WHERE n.hasspn=true RETURN n",
+      "generation_time": 1.2,
+      "generation_error": null,
+      "syntax_valid": true,
+      "syntax_errors": [],
+      "validation_time": 0.003
+    }
+  ]
+}
+```
+
 ## Dependencies
 
 - **python-dotenv** - Environment variable management
@@ -218,6 +317,7 @@ The `data/queries.json` file should contain an array of query objects:
 - **antlr4-python3-runtime** - ANTLR runtime for parsing
 - **antlr4-cypher** - Pre-built Cypher grammar for ANTLR
 - **neo4j** - Neo4j driver for semantic validation (optional)
+- **openai** - OpenAI API client for LLM query generation
 
 ## Contributing
 

@@ -1,0 +1,31 @@
+Find all kerberoastable users on the domain
+Identify users with active sessions on more than 5 machines (potential lateral movement)
+List users who joined or left more than 3 groups in the past 30 days (group churn analysis)
+Find users recently granted administrative access (past 7 days)
+Detect users with logons during non-business hours (e.g., weekends or late night)
+Identify disabled accounts that still have active sessions
+Locate non-admin users with control over accounts that have AdminTo relationships
+Identify users with permission to reset passwords of users with high-value group memberships
+Enumerate paths where local admin rights exist on unmanaged or rogue systems
+Find paths from low-priv users to GPOs linked to high-value OUs
+Discover ADCS paths where enrollment is allowed but no approval workflow is enforced
+Find computers with duplicate SPNs (indicative of misconfiguration)
+Identify misaligned trust relationships between domains (e.g., stale external trusts)
+Detect certificate templates allowing client authentication without EKU restrictions
+List all ACLs that allow any principal to change a computer’s DNS hostname
+Highlight expired but enabled computer accounts
+Identify users with stealthy DACL-based persistence (WriteDACL without admin rights)
+Show GPOs with unlinked but still active policies
+Detect shadow admin paths (e.g., ForceChangePassword to local admin accounts)
+List users with access to SCCM or similar system management tools
+Find groups or users with rights to modify service accounts
+Detect certificate templates allowing enrollment from untrusted security groups
+List users who have recently moved across domains
+Find sessions of users with MFA disabled
+Identify users with access to backup servers or VSS services
+Highlight computers that have both unconstrained delegation and admin sessions
+Detect duplicate user accounts with overlapping access paths
+Identify users with nested group membership that leads to high privilege
+Find ACLs where "Everyone" or "Authenticated Users" has dangerous rights
+Find users with both plaintext passwords and local admin rights
+Detect users with permissions to modify account expiration settings
