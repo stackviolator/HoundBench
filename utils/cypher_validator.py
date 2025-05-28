@@ -67,18 +67,40 @@ def _antlr_validate(query: str) -> Tuple[bool, List[str], float]:
     start_time = time.monotonic()
     
     try:
-        stream = InputStream(query)
+        # Preprocess query to handle =~ operator (regex matching)
+        # The antlr4-cypher grammar doesn't support =~ so we temporarily replace it
+        # with = for syntax validation purposes
+        preprocessed_query = query.replace('=~', '=')
+        
+        stream = InputStream(preprocessed_query)
         lexer = CypherLexer(stream)
+        
+        # Add error listener to lexer to catch token recognition errors
+        lexer_listener = _CypherErrorListener()
+        lexer.removeErrorListeners()
+        lexer.addErrorListener(lexer_listener)
+        
         tokens = CommonTokenStream(lexer)
         parser = CypherParser(tokens)
 
-        listener = _CypherErrorListener()
+        # Add error listener to parser to catch syntax errors
+        parser_listener = _CypherErrorListener()
         parser.removeErrorListeners()
-        parser.addErrorListener(listener)
+        parser.addErrorListener(parser_listener)
+        
         parser.script()  # Entry rule in the OpenCypher grammar
 
+        # Combine errors from both lexer and parser
+        all_errors = lexer_listener.messages + parser_listener.messages
+        
+        # If validation passed but we had =~ operators, add a note
+        if not all_errors and '=~' in query:
+            # This is actually valid - =~ is a legitimate Cypher operator
+            # The ANTLR grammar just doesn't support it, so we consider it valid
+            pass
+        
         execution_time = time.monotonic() - start_time
-        return not listener.messages, listener.messages, execution_time
+        return not all_errors, all_errors, execution_time
         
     except Exception as e:
         execution_time = time.monotonic() - start_time
