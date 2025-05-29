@@ -4,7 +4,7 @@ import os
 import json
 import time
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 
 # Rich imports for beautiful console output
@@ -22,7 +22,14 @@ from phoenix.otel import register
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.cypher_validator import validate_query, ValidationResult
-from utils.apiclient import Client, Credentials
+from utils.dataset_utils import (
+    load_queries_dataset, 
+    split_dataset, 
+    calculate_query_similarity,
+    sample_dataset,
+    filter_dataset_by_source
+)
+from datasets import Dataset
 
 # Load environment variables
 load_dotenv()
@@ -35,37 +42,32 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
-# BloodHound API Configuration for semantic evaluation
-BHE_DOMAIN = os.getenv("BHE_DOMAIN")
-BHE_PORT = int(os.getenv("BHE_PORT", "443"))
-BHE_SCHEME = os.getenv("BHE_SCHEME", "https")
-BHE_TOKEN_ID = os.getenv("BHE_TOKEN_ID")
-BHE_TOKEN_KEY = os.getenv("BHE_TOKEN_KEY")
-
-# Alternative LLM providers (uncomment and configure as needed)
-# ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-# ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-sonnet-20240229")
+# LLM Hyperparameters
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "5000"))
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.6"))
 
 # Rate limiting
 REQUEST_DELAY_SECONDS = float(os.getenv("REQUEST_DELAY_SECONDS", "1.0"))
-SEMANTIC_QUERY_DELAY_SECONDS = float(os.getenv("SEMANTIC_QUERY_DELAY_SECONDS", "0.5"))
 
-# Semantic evaluation configuration
-SEMANTIC_COMPARISON_TOLERANCE = float(os.getenv("SEMANTIC_COMPARISON_TOLERANCE", "0.01"))
-MAX_RESULTS_FOR_COMPARISON = int(os.getenv("MAX_RESULTS_FOR_COMPARISON", "100"))
+# Query similarity configuration
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.8"))
+EXACT_MATCH_WEIGHT = float(os.getenv("EXACT_MATCH_WEIGHT", "0.4"))
+TOKEN_SIMILARITY_WEIGHT = float(os.getenv("TOKEN_SIMILARITY_WEIGHT", "0.3"))
+STRUCTURAL_SIMILARITY_WEIGHT = float(os.getenv("STRUCTURAL_SIMILARITY_WEIGHT", "0.3"))
 
 # File paths
-DESCRIPTIONS_FILE = os.path.join(os.path.dirname(__file__), '..', 'prompts', 'descriptions.txt')
 SYSTEM_PROMPT_FILE = os.path.join(os.path.dirname(__file__), '..', 'prompts', 'system_prompt.txt')
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
-GOLDEN_DATASETS_DIR = os.path.join(OUTPUT_DIR, 'golden_datasets')
+QUERIES_DATASET_FILE = os.path.join(OUTPUT_DIR, 'queries.json')
 
 class LLMClient:
     """Generic LLM client that can work with different providers."""
     
-    def __init__(self, provider: str = "openai"):
+    def __init__(self, provider: str = "openai", temperature: float = None, max_tokens: int = None):
         self.provider = provider.lower()
         self.client = None
+        self.temperature = temperature if temperature is not None else LLM_TEMPERATURE
+        self.max_tokens = max_tokens if max_tokens is not None else LLM_MAX_TOKENS
         self._setup_client()
     
     def _setup_client(self):
@@ -90,9 +92,6 @@ class LLMClient:
                 console.print(f"[red]Error setting up OpenAI client:[/red] {e}")
                 raise
         
-        # Add other providers here as needed
-        # elif self.provider == "anthropic":
-        #     # Anthropic setup code
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
     
@@ -106,8 +105,8 @@ class LLMClient:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt}
                     ],
-                    temperature=0.1,  # Low temperature for more consistent results
-                    max_tokens=1000
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
@@ -115,22 +114,6 @@ class LLMClient:
                 return f"ERROR: {str(e)}"
         
         return "ERROR: Unsupported provider"
-
-def load_descriptions(file_path: str) -> List[str]:
-    """Load descriptions from the descriptions.txt file."""
-    try:
-        with open(file_path, 'r') as f:
-            descriptions = [line.strip() for line in f.readlines() if line.strip()]
-        
-        console.print(f"[green]✓[/green] Loaded {len(descriptions)} descriptions from {file_path}")
-        return descriptions
-        
-    except FileNotFoundError:
-        console.print(f"[red]Error:[/red] Descriptions file not found at {file_path}")
-        return []
-    except Exception as e:
-        console.print(f"[red]Error loading descriptions:[/red] {e}")
-        return []
 
 def load_system_prompt(file_path: str) -> str:
     """Load the system prompt from file."""
@@ -196,254 +179,39 @@ def extract_query_from_response(response: str) -> str:
     else:
         return response.strip()
 
-def load_golden_dataset(file_path: str) -> Optional[Dict[str, Any]]:
-    """Load a golden dataset from JSON file."""
-    try:
-        with open(file_path, 'r') as f:
-            dataset = json.load(f)
-        
-        console.print(f"[green]✓[/green] Loaded golden dataset from {file_path}")
-        
-        if "dataset" in dataset:
-            # New format with metadata
-            console.print(f"[dim]Dataset contains {len(dataset['dataset'])} entries[/dim]")
-            return dataset
-        else:
-            # Legacy format - assume it's just the dataset array
-            console.print(f"[dim]Legacy format dataset with {len(dataset)} entries[/dim]")
-            return {"dataset": dataset, "metadata": {}}
-            
-    except FileNotFoundError:
-        console.print(f"[red]Error:[/red] Golden dataset file not found at {file_path}")
-        return None
-    except json.JSONDecodeError:
-        console.print(f"[red]Error:[/red] Could not decode JSON from {file_path}")
-        return None
-    except Exception as e:
-        console.print(f"[red]Error loading golden dataset:[/red] {e}")
-        return None
-
-def find_golden_dataset_files(directory: str = GOLDEN_DATASETS_DIR) -> List[str]:
-    """Find all golden dataset files in the specified directory."""
-    if not os.path.exists(directory):
-        return []
-    
-    dataset_files = []
-    for filename in os.listdir(directory):
-        if filename.startswith('golden_dataset_') and filename.endswith('.json'):
-            dataset_files.append(os.path.join(directory, filename))
-    
-    return sorted(dataset_files, reverse=True)  # Most recent first
-
-def normalize_result_for_comparison(result: Any) -> Any:
-    """Normalize a result for comparison by sorting lists and handling special cases."""
-    if isinstance(result, list):
-        # Sort list items for consistent comparison
-        try:
-            # Try to sort if items are comparable
-            if all(isinstance(item, (str, int, float)) for item in result):
-                return sorted(result)
-            elif all(isinstance(item, dict) for item in result):
-                # Sort dicts by their string representation for consistency
-                return sorted(result, key=lambda x: json.dumps(x, sort_keys=True))
-            else:
-                # Mixed types - convert to strings and sort
-                return sorted([str(item) for item in result])
-        except (TypeError, ValueError):
-            # If sorting fails, return as-is
-            return result
-    elif isinstance(result, dict):
-        # Recursively normalize dict values and sort keys
-        return {k: normalize_result_for_comparison(v) for k, v in sorted(result.items())}
-    else:
-        return result
-
-def compare_results(result1: Any, result2: Any, tolerance: float = SEMANTIC_COMPARISON_TOLERANCE) -> Dict[str, Any]:
-    """
-    Compare two query results and return comparison metrics.
-    
-    Returns:
-        Dict with keys: exact_match, similarity_score, differences
-    """
-    # Normalize both results
-    norm_result1 = normalize_result_for_comparison(result1)
-    norm_result2 = normalize_result_for_comparison(result2)
-    
-    # Check for exact match
-    exact_match = norm_result1 == norm_result2
-    
-    if exact_match:
-        return {
-            "exact_match": True,
-            "similarity_score": 1.0,
-            "differences": [],
-            "comparison_type": "exact"
-        }
-    
-    # For lists, calculate overlap
-    if isinstance(norm_result1, list) and isinstance(norm_result2, list):
-        set1 = set(json.dumps(item, sort_keys=True) if isinstance(item, dict) else str(item) for item in norm_result1)
-        set2 = set(json.dumps(item, sort_keys=True) if isinstance(item, dict) else str(item) for item in norm_result2)
-        
-        intersection = len(set1 & set2)
-        union = len(set1 | set2)
-        
-        similarity_score = intersection / union if union > 0 else 0.0
-        
-        differences = {
-            "only_in_result1": list(set1 - set2),
-            "only_in_result2": list(set2 - set1),
-            "common_items": list(set1 & set2)
-        }
-        
-        return {
-            "exact_match": False,
-            "similarity_score": similarity_score,
-            "differences": differences,
-            "comparison_type": "set_overlap"
-        }
-    
-    # For other types, just check if they're close enough
-    try:
-        if isinstance(norm_result1, (int, float)) and isinstance(norm_result2, (int, float)):
-            diff = abs(norm_result1 - norm_result2)
-            max_val = max(abs(norm_result1), abs(norm_result2), 1)  # Avoid division by zero
-            similarity_score = 1.0 - (diff / max_val)
-            
-            return {
-                "exact_match": False,
-                "similarity_score": max(0.0, similarity_score),
-                "differences": {"numeric_difference": diff},
-                "comparison_type": "numeric"
-            }
-    except (TypeError, ValueError):
-        pass
-    
-    # Default case - just string comparison
-    str1, str2 = str(norm_result1), str(norm_result2)
-    similarity_score = 1.0 if str1 == str2 else 0.0
-    
-    return {
-        "exact_match": False,
-        "similarity_score": similarity_score,
-        "differences": {"string_diff": f"'{str1}' vs '{str2}'"},
-        "comparison_type": "string"
-    }
-
-def find_matching_golden_entry(description: str, golden_dataset: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Find a matching entry in the golden dataset based on description."""
-    dataset_entries = golden_dataset.get("dataset", [])
-    
-    # First try exact description match
-    for entry in dataset_entries:
-        if entry.get("description", "").strip().lower() == description.strip().lower():
-            return entry
-    
-    # If no exact match, try partial matching
-    description_lower = description.strip().lower()
-    for entry in dataset_entries:
-        entry_desc = entry.get("description", "").strip().lower()
-        if description_lower in entry_desc or entry_desc in description_lower:
-            return entry
-    
-    return None
-
-def perform_semantic_evaluation(
-    description: str, 
-    generated_query: str, 
-    golden_dataset: Dict[str, Any], 
-    bloodhound_client: Client
-) -> Optional[Dict[str, Any]]:
-    """
-    Perform semantic evaluation by executing the generated query and comparing with golden dataset.
-    
-    Returns:
-        Dict with evaluation results or None if evaluation failed
-    """
-    start_time = time.monotonic()
-    
-    try:
-        # Find matching golden entry
-        golden_entry = find_matching_golden_entry(description, golden_dataset)
-        if not golden_entry:
-            return {
-                "found_golden_match": False,
-                "execution_time": time.monotonic() - start_time,
-                "error": "No matching golden dataset entry found"
-            }
-        
-        # Execute the generated query
-        try:
-            generated_result = bloodhound_client.run_cypher(generated_query, include_properties=True)
-            
-            # Truncate result if too large
-            if isinstance(generated_result, list) and len(generated_result) > MAX_RESULTS_FOR_COMPARISON:
-                generated_result = generated_result[:MAX_RESULTS_FOR_COMPARISON]
-                
-        except Exception as e:
-            return {
-                "found_golden_match": True,
-                "golden_entry_description": golden_entry.get("description"),
-                "execution_time": time.monotonic() - start_time,
-                "execution_error": str(e),
-                "exact_match": False,
-                "similarity_score": 0.0
-            }
-        
-        # Compare results
-        golden_result = golden_entry.get("result")
-        comparison = compare_results(generated_result, golden_result)
-        
-        # Add rate limiting
-        time.sleep(SEMANTIC_QUERY_DELAY_SECONDS)
-        
-        return {
-            "found_golden_match": True,
-            "golden_entry_description": golden_entry.get("description"),
-            "golden_query": golden_entry.get("query"),
-            "execution_time": time.monotonic() - start_time,
-            "execution_error": None,
-            "exact_match": comparison["exact_match"],
-            "similarity_score": comparison["similarity_score"],
-            "comparison_details": comparison,
-            "generated_result_count": len(generated_result) if isinstance(generated_result, list) else 1,
-            "golden_result_count": len(golden_result) if isinstance(golden_result, list) else 1
-        }
-        
-    except Exception as e:
-        return {
-            "found_golden_match": False,
-            "execution_time": time.monotonic() - start_time,
-            "error": f"Semantic evaluation failed: {str(e)}"
-        }
-
-def generate_queries_from_descriptions(
-    descriptions: List[str],
+def generate_queries_from_test_set(
+    test_set: Dataset,
     system_prompt: str,
     llm_client: LLMClient,
     validate_syntax: bool = True,
     save_results: bool = True,
-    enable_semantic_eval: bool = False,
-    golden_dataset: Optional[Dict[str, Any]] = None,
-    bloodhound_client: Optional[Client] = None
+    similarity_threshold: float = SIMILARITY_THRESHOLD
 ) -> Dict[str, Any]:
-    """Generate Cypher queries for all descriptions and evaluate them."""
+    """Generate Cypher queries for test set descriptions and evaluate against ground truth."""
     
-    total_descriptions = len(descriptions)
+    total_test_cases = len(test_set)
     generated_queries = []
     syntax_valid_count = 0
     syntax_invalid_count = 0
     generation_errors = 0
     
+    # Similarity metrics
+    exact_matches = 0
+    high_similarity_count = 0
+    medium_similarity_count = 0
+    low_similarity_count = 0
+    similarity_scores = []
+    
     console.print(Panel(
         f"[bold cyan]LLM Query Generation Evaluation[/bold cyan]\n"
-        f"Descriptions: [yellow]{total_descriptions}[/yellow]\n"
+        f"Test Cases: [yellow]{total_test_cases}[/yellow]\n"
         f"LLM Provider: [green]{llm_client.provider.title()}[/green]\n"
         f"Model: [green]{llm_client.model}[/green]\n"
+        f"Temperature: [cyan]{llm_client.temperature}[/cyan]\n"
+        f"Max Tokens: [cyan]{llm_client.max_tokens}[/cyan]\n"
         f"Syntax Validation: [{'green]Enabled[/green]' if validate_syntax else 'yellow]Disabled[/yellow]'}\n"
-        f"Semantic Evaluation: [{'green]Enabled[/green]' if enable_semantic_eval else 'yellow]Disabled[/yellow]'}"
-        + (f"\nGolden Dataset: [cyan]{len(golden_dataset.get('dataset', []))} entries[/cyan]" if golden_dataset else ""),
-        title="Generation Configuration",
+        f"Similarity Threshold: [cyan]{similarity_threshold}[/cyan]",
+        title="Evaluation Configuration",
         border_style="blue"
     ))
     
@@ -459,16 +227,28 @@ def generate_queries_from_descriptions(
         transient=False
     ) as progress:
         
-        task = progress.add_task("Generating Queries", total=total_descriptions)
+        task = progress.add_task("Evaluating Test Cases", total=total_test_cases)
         
-        for i, description in enumerate(descriptions):
-            progress.update(task, description=f"Query {i+1}/{total_descriptions}")
+        for i in range(total_test_cases):
+            progress.update(task, description=f"Test Case {i+1}/{total_test_cases}")
             
-            # Display current description
+            test_case = test_set[i]
+            description = test_case["description"]
+            ground_truth_query = test_case["query"]
+            
+            # Display current test case
             console.print(Panel(
                 Text(description, style="bold white"),
-                title=f"Description {i+1}/{total_descriptions}",
+                title=f"Test Case {i+1}/{total_test_cases}",
                 border_style="blue"
+            ))
+            
+            # Display ground truth query
+            ground_truth_syntax = Syntax(ground_truth_query, "cypher", theme="monokai", line_numbers=True)
+            console.print(Panel(
+                ground_truth_syntax,
+                title="Ground Truth Query",
+                border_style="yellow"
             ))
             
             # Generate query
@@ -487,15 +267,16 @@ def generate_queries_from_descriptions(
                     ))
                     
                     query_result = {
-                        "description_number": i + 1,
+                        "test_case_number": i + 1,
                         "description": description,
+                        "ground_truth_query": ground_truth_query,
                         "raw_response": raw_response,
                         "generated_query": None,
                         "generation_time": generation_time,
                         "generation_error": generated_query,
                         "syntax_valid": False,
                         "syntax_errors": ["Generation failed"],
-                        "semantic_evaluation": None
+                        "similarity_evaluation": None
                     }
                 else:
                     # Display generated query
@@ -535,55 +316,59 @@ def generate_queries_from_descriptions(
                                 subtitle=f"Took {validation_time:.3f}s"
                             ))
                     
-                    # Semantic evaluation if enabled
-                    semantic_eval_result = None
-                    if enable_semantic_eval and syntax_valid and golden_dataset and bloodhound_client:
-                        console.print("[dim]Running semantic evaluation...[/dim]")
-                        semantic_eval_result = perform_semantic_evaluation(
-                            description, generated_query, golden_dataset, bloodhound_client
-                        )
-                        
-                        if semantic_eval_result:
-                            # Check if semantic evaluation was successful (has the required keys)
-                            if semantic_eval_result.get("exact_match") is True:
-                                console.print(Panel(
-                                    Text("✓ Semantic evaluation: Exact match with golden dataset", style="bold green"),
-                                    title="Semantic Evaluation",
-                                    border_style="green",
-                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
-                                ))
-                            elif semantic_eval_result.get("similarity_score", 0) > 0.8:
-                                console.print(Panel(
-                                    Text(f"✓ Semantic evaluation: High similarity ({semantic_eval_result.get('similarity_score', 0):.2f})", style="bold yellow"),
-                                    title="Semantic Evaluation",
-                                    border_style="yellow",
-                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
-                                ))
-                            elif semantic_eval_result.get("similarity_score", 0) > 0:
-                                console.print(Panel(
-                                    Text(f"✗ Semantic evaluation: Low similarity ({semantic_eval_result.get('similarity_score', 0):.2f})", style="bold red"),
-                                    title="Semantic Evaluation",
-                                    border_style="red",
-                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
-                                ))
-                            elif semantic_eval_result.get("error"):
-                                console.print(Panel(
-                                    Text(f"✗ Semantic evaluation failed: {semantic_eval_result.get('error')}", style="bold red"),
-                                    title="Semantic Evaluation Error",
-                                    border_style="red",
-                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
-                                ))
-                            else:
-                                console.print(Panel(
-                                    Text("✗ Semantic evaluation: Unknown result", style="bold red"),
-                                    title="Semantic Evaluation",
-                                    border_style="red",
-                                    subtitle=f"Took {semantic_eval_result.get('execution_time', 0):.3f}s"
-                                ))
+                    # Calculate query similarity
+                    console.print("[dim]Calculating query similarity...[/dim]")
+                    similarity_start = time.monotonic()
+                    similarity_result = calculate_query_similarity(
+                        generated_query, 
+                        ground_truth_query,
+                        exact_match_weight=EXACT_MATCH_WEIGHT,
+                        token_similarity_weight=TOKEN_SIMILARITY_WEIGHT,
+                        structural_similarity_weight=STRUCTURAL_SIMILARITY_WEIGHT
+                    )
+                    similarity_time = time.monotonic() - similarity_start
+                    
+                    # Categorize similarity
+                    overall_score = similarity_result["overall_score"]
+                    similarity_scores.append(overall_score)
+                    
+                    if similarity_result["exact_match"]:
+                        exact_matches += 1
+                        console.print(Panel(
+                            Text("✓ Exact match with ground truth!", style="bold green"),
+                            title="Similarity Evaluation",
+                            border_style="green",
+                            subtitle=f"Score: {overall_score:.3f} | Took {similarity_time:.3f}s"
+                        ))
+                    elif overall_score >= similarity_threshold:
+                        high_similarity_count += 1
+                        console.print(Panel(
+                            Text(f"✓ High similarity (score: {overall_score:.3f})", style="bold yellow"),
+                            title="Similarity Evaluation",
+                            border_style="yellow",
+                            subtitle=f"Token: {similarity_result['token_similarity']:.3f} | Structural: {similarity_result['structural_similarity']:.3f} | Took {similarity_time:.3f}s"
+                        ))
+                    elif overall_score >= 0.5:
+                        medium_similarity_count += 1
+                        console.print(Panel(
+                            Text(f"~ Medium similarity (score: {overall_score:.3f})", style="bold blue"),
+                            title="Similarity Evaluation",
+                            border_style="blue",
+                            subtitle=f"Token: {similarity_result['token_similarity']:.3f} | Structural: {similarity_result['structural_similarity']:.3f} | Took {similarity_time:.3f}s"
+                        ))
+                    else:
+                        low_similarity_count += 1
+                        console.print(Panel(
+                            Text(f"✗ Low similarity (score: {overall_score:.3f})", style="bold red"),
+                            title="Similarity Evaluation",
+                            border_style="red",
+                            subtitle=f"Token: {similarity_result['token_similarity']:.3f} | Structural: {similarity_result['structural_similarity']:.3f} | Took {similarity_time:.3f}s"
+                        ))
                     
                     query_result = {
-                        "description_number": i + 1,
+                        "test_case_number": i + 1,
                         "description": description,
+                        "ground_truth_query": ground_truth_query,
                         "raw_response": raw_response,
                         "generated_query": generated_query,
                         "generation_time": generation_time,
@@ -591,7 +376,8 @@ def generate_queries_from_descriptions(
                         "syntax_valid": syntax_valid,
                         "syntax_errors": syntax_errors,
                         "validation_time": validation_time,
-                        "semantic_evaluation": semantic_eval_result
+                        "similarity_evaluation": similarity_result,
+                        "similarity_time": similarity_time
                     }
                 
                 generated_queries.append(query_result)
@@ -607,15 +393,16 @@ def generate_queries_from_descriptions(
                 ))
                 
                 query_result = {
-                    "description_number": i + 1,
+                    "test_case_number": i + 1,
                     "description": description,
+                    "ground_truth_query": ground_truth_query,
                     "raw_response": None,
                     "generated_query": None,
                     "generation_time": generation_time,
                     "generation_error": str(e),
                     "syntax_valid": False,
                     "syntax_errors": ["Generation failed with exception"],
-                    "semantic_evaluation": None
+                    "similarity_evaluation": None
                 }
                 generated_queries.append(query_result)
             
@@ -629,53 +416,24 @@ def generate_queries_from_descriptions(
     total_runtime = overall_end_time - overall_start_time
     
     # Calculate statistics
-    successful_generations = total_descriptions - generation_errors
-    
-    # Calculate semantic evaluation statistics
-    semantic_eval_count = 0
-    semantic_exact_matches = 0
-    semantic_high_similarity = 0
-    semantic_low_similarity = 0
-    semantic_errors = 0
-    avg_similarity_score = 0.0
-    
-    if enable_semantic_eval:
-        semantic_scores = []
-        for query_result in generated_queries:
-            semantic_eval = query_result.get("semantic_evaluation")
-            if semantic_eval:
-                semantic_eval_count += 1
-                if semantic_eval.get("exact_match"):
-                    semantic_exact_matches += 1
-                elif semantic_eval.get("similarity_score", 0) > 0.8:
-                    semantic_high_similarity += 1
-                elif semantic_eval.get("similarity_score", 0) > 0.0:
-                    semantic_low_similarity += 1
-                else:
-                    semantic_errors += 1
-                
-                if "similarity_score" in semantic_eval:
-                    semantic_scores.append(semantic_eval["similarity_score"])
-        
-        if semantic_scores:
-            avg_similarity_score = sum(semantic_scores) / len(semantic_scores)
+    successful_generations = total_test_cases - generation_errors
+    avg_similarity_score = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
     
     results = {
         "evaluation_timestamp": datetime.now().isoformat(),
         "llm_provider": llm_client.provider,
         "llm_model": llm_client.model,
-        "total_descriptions": total_descriptions,
+        "total_test_cases": total_test_cases,
         "successful_generations": successful_generations,
         "generation_errors": generation_errors,
         "syntax_validation_enabled": validate_syntax,
         "syntax_valid_queries": syntax_valid_count,
         "syntax_invalid_queries": syntax_invalid_count,
-        "semantic_evaluation_enabled": enable_semantic_eval,
-        "semantic_evaluations_performed": semantic_eval_count,
-        "semantic_exact_matches": semantic_exact_matches,
-        "semantic_high_similarity": semantic_high_similarity,
-        "semantic_low_similarity": semantic_low_similarity,
-        "semantic_errors": semantic_errors,
+        "similarity_threshold": similarity_threshold,
+        "exact_matches": exact_matches,
+        "high_similarity_count": high_similarity_count,
+        "medium_similarity_count": medium_similarity_count,
+        "low_similarity_count": low_similarity_count,
         "average_similarity_score": avg_similarity_score,
         "total_runtime": total_runtime,
         "generated_queries": generated_queries
@@ -700,7 +458,7 @@ def display_summary_statistics(results: Dict[str, Any]):
     stats_table.add_column("Metric", style="dim", width=40)
     stats_table.add_column("Value", justify="right")
     
-    stats_table.add_row("Total Descriptions", str(results["total_descriptions"]))
+    stats_table.add_row("Total Test Cases", str(results["total_test_cases"]))
     stats_table.add_row(
         Text("Successful Generations", style="green"),
         Text(str(results["successful_generations"]), style="green")
@@ -724,41 +482,36 @@ def display_summary_statistics(results: Dict[str, Any]):
             syntax_success_rate = (results["syntax_valid_queries"] / results["successful_generations"]) * 100
             stats_table.add_row("Syntax Success Rate", f"{syntax_success_rate:.1f}%")
     
-    # Add semantic evaluation statistics
-    if results.get("semantic_evaluation_enabled"):
-        stats_table.add_row("", "")  # Separator
-        stats_table.add_row(
-            Text("Semantic Evaluations Performed", style="cyan"),
-            Text(str(results["semantic_evaluations_performed"]), style="cyan")
-        )
-        stats_table.add_row(
-            Text("Exact Matches", style="green"),
-            Text(str(results["semantic_exact_matches"]), style="green")
-        )
-        stats_table.add_row(
-            Text("High Similarity (>80%)", style="yellow"),
-            Text(str(results["semantic_high_similarity"]), style="yellow")
-        )
-        stats_table.add_row(
-            Text("Low Similarity", style="red"),
-            Text(str(results["semantic_low_similarity"]), style="red")
-        )
-        stats_table.add_row(
-            Text("Semantic Errors", style="red"),
-            Text(str(results["semantic_errors"]), style="red")
-        )
-        
-        if results["semantic_evaluations_performed"] > 0:
-            semantic_accuracy = ((results["semantic_exact_matches"] + results["semantic_high_similarity"]) / 
-                               results["semantic_evaluations_performed"]) * 100
-            stats_table.add_row("Semantic Accuracy Rate", f"{semantic_accuracy:.1f}%")
-            stats_table.add_row("Average Similarity Score", f"{results['average_similarity_score']:.3f}")
+    # Add similarity statistics
+    stats_table.add_row("", "")  # Separator
+    stats_table.add_row(
+        Text("Exact Matches", style="green"),
+        Text(str(results["exact_matches"]), style="green")
+    )
+    stats_table.add_row(
+        Text(f"High Similarity (≥{results['similarity_threshold']:.1f})", style="yellow"),
+        Text(str(results["high_similarity_count"]), style="yellow")
+    )
+    stats_table.add_row(
+        Text("Medium Similarity (0.5-0.8)", style="blue"),
+        Text(str(results["medium_similarity_count"]), style="blue")
+    )
+    stats_table.add_row(
+        Text("Low Similarity (<0.5)", style="red"),
+        Text(str(results["low_similarity_count"]), style="red")
+    )
+    
+    if results["total_test_cases"] > 0:
+        accuracy_rate = ((results["exact_matches"] + results["high_similarity_count"]) / 
+                        results["total_test_cases"]) * 100
+        stats_table.add_row("Accuracy Rate (Exact + High)", f"{accuracy_rate:.1f}%")
+        stats_table.add_row("Average Similarity Score", f"{results['average_similarity_score']:.3f}")
     
     stats_table.add_row("Total Runtime", f"{results['total_runtime']:.2f} seconds")
     
     if results["successful_generations"] > 0:
-        avg_time = results["total_runtime"] / results["total_descriptions"]
-        stats_table.add_row("Average Time per Query", f"{avg_time:.2f} seconds")
+        avg_time = results["total_runtime"] / results["total_test_cases"]
+        stats_table.add_row("Average Time per Test Case", f"{avg_time:.2f} seconds")
     
     console.print(Padding(stats_table, (1, 0)))
 
@@ -767,7 +520,7 @@ def save_evaluation_results(results: Dict[str, Any]):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     # Save complete results
-    results_file = os.path.join(OUTPUT_DIR, f'llm_generation_results_{timestamp}.json')
+    results_file = os.path.join(OUTPUT_DIR, f'llm_evaluation_results_{timestamp}.json')
     
     try:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -781,18 +534,20 @@ def save_evaluation_results(results: Dict[str, Any]):
             border_style="cyan"
         ))
         
-        # Also save just the valid queries in the format expected by other scripts
+        # Also save just the valid queries in a simplified format
         valid_queries = []
         for query_result in results["generated_queries"]:
             if query_result["generated_query"] and query_result["syntax_valid"]:
                 valid_queries.append({
                     "description": query_result["description"],
-                    "query": query_result["generated_query"],
-                    "source": f"llm_generated_{results['llm_provider']}_{results['llm_model']}"
+                    "generated_query": query_result["generated_query"],
+                    "ground_truth_query": query_result["ground_truth_query"],
+                    "similarity_score": query_result.get("similarity_evaluation", {}).get("overall_score", 0.0),
+                    "source": f"eval_{results['llm_provider']}_{results['llm_model']}"
                 })
         
         if valid_queries:
-            queries_file = os.path.join(OUTPUT_DIR, f'llm_generated_queries_{timestamp}.json')
+            queries_file = os.path.join(OUTPUT_DIR, f'eval_queries_{timestamp}.json')
             with open(queries_file, 'w') as f:
                 json.dump(valid_queries, f, indent=2)
             
@@ -821,21 +576,45 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Generate Cypher queries using LLM based on descriptions",
+        description="Evaluate LLM-generated Cypher queries against ground truth using train/test split",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Generate queries using OpenAI GPT-4
+  # Basic evaluation with default local dataset
   python eval.py
+  
+  # Use a different local JSON file
+  python eval.py --dataset /path/to/custom_queries.json
+  
+  # Load from Hugging Face Hub
+  python eval.py --dataset "username/cypher-queries-dataset"
+  
+  # Load specific split from HF dataset
+  python eval.py --dataset "username/dataset" --dataset-split "test"
+  
+  # Load with dataset configuration
+  python eval.py --dataset "username/dataset" --dataset-config "bloodhound"
+  
+  # Filter by sources
+  python eval.py --filter-sources "hausec.com" "redfoxsec.com"
+  
+  # Sample 50 random examples for quick testing
+  python eval.py --sample-size 50
   
   # Generate without syntax validation
   python eval.py --no-validate
   
-  # Enable semantic evaluation with golden dataset
-  python eval.py --semantic-eval --golden-dataset /path/to/golden_dataset.json
+  # Custom train/test split ratio
+  python eval.py --test-ratio 0.2
   
-  # Use custom files
-  python eval.py --descriptions /path/to/descriptions.txt --system-prompt /path/to/prompt.txt
+  # Use custom system prompt
+  python eval.py --system-prompt /path/to/prompt.txt
+  
+  # Adjust LLM hyperparameters
+  python eval.py --temperature 0.3 --max-tokens 2000
+  
+  # Custom similarity threshold
+  python eval.py --similarity-threshold 0.9
   
   # Don't save results
   python eval.py --no-save
@@ -843,9 +622,35 @@ Examples:
     )
     
     parser.add_argument(
-        "--descriptions",
-        default=DESCRIPTIONS_FILE,
-        help=f"Path to descriptions file (default: {DESCRIPTIONS_FILE})"
+        "--dataset",
+        default=QUERIES_DATASET_FILE,
+        help=f"Path to queries dataset file, HF dataset name, or 'local' for local JSON (default: {QUERIES_DATASET_FILE})"
+    )
+    
+    parser.add_argument(
+        "--dataset-split",
+        default=None,
+        help="Dataset split to use (e.g., 'train', 'test', 'validation'). Only for HF datasets."
+    )
+    
+    parser.add_argument(
+        "--dataset-config",
+        default=None,
+        help="Dataset configuration name for HF datasets"
+    )
+    
+    parser.add_argument(
+        "--filter-sources",
+        nargs='+',
+        default=None,
+        help="Filter dataset to only include entries from specific sources"
+    )
+    
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=None,
+        help="Sample N random examples from the dataset for faster testing"
     )
     
     parser.add_argument(
@@ -862,6 +667,27 @@ Examples:
     )
     
     parser.add_argument(
+        "--test-ratio",
+        type=float,
+        default=0.15,
+        help="Ratio of dataset to use for testing (default: 0.15)"
+    )
+    
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=42,
+        help="Random seed for dataset splitting (default: 42)"
+    )
+    
+    parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=SIMILARITY_THRESHOLD,
+        help=f"Threshold for high similarity classification (default: {SIMILARITY_THRESHOLD})"
+    )
+    
+    parser.add_argument(
         "--no-validate",
         action="store_true",
         help="Skip syntax validation of generated queries"
@@ -874,119 +700,140 @@ Examples:
     )
     
     parser.add_argument(
-        "--semantic-eval",
-        action="store_true",
-        help="Enable semantic evaluation against golden dataset"
-    )
-    
-    parser.add_argument(
-        "--golden-dataset",
-        help="Path to golden dataset file (if not specified, will try to find latest)"
-    )
-    
-    parser.add_argument(
-        "--comparison-tolerance",
+        "--temperature",
         type=float,
-        default=SEMANTIC_COMPARISON_TOLERANCE,
-        help=f"Tolerance for numerical comparisons (default: {SEMANTIC_COMPARISON_TOLERANCE})"
+        default=LLM_TEMPERATURE,
+        help=f"LLM temperature for generation (default: {LLM_TEMPERATURE})"
+    )
+    
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=LLM_MAX_TOKENS,
+        help=f"Maximum tokens for LLM generation (default: {LLM_MAX_TOKENS})"
     )
     
     args = parser.parse_args()
     
-    # Load required files
-    descriptions = load_descriptions(args.descriptions)
-    system_prompt = load_system_prompt(args.system_prompt)
-    
-    if not descriptions:
-        console.print("[red]No descriptions loaded. Exiting.[/red]")
+    # Validate arguments
+    if not 0 < args.test_ratio < 1:
+        console.print("[red]Error: test-ratio must be between 0 and 1[/red]")
         return
     
+    if not 0 <= args.similarity_threshold <= 1:
+        console.print("[red]Error: similarity-threshold must be between 0 and 1[/red]")
+        return
+    
+    # Load dataset
+    console.print(Panel(
+        Text("Loading and preparing dataset...", style="bold cyan"),
+        title="Dataset Preparation",
+        border_style="blue"
+    ))
+    
+    try:
+        # Prepare dataset loading arguments
+        if args.dataset.endswith('.json') or args.dataset == 'local':
+            # Load from local JSON file
+            dataset_path = QUERIES_DATASET_FILE if args.dataset == 'local' else args.dataset
+            dataset = load_queries_dataset(dataset_path)
+        else:
+            # Load from Hugging Face Hub
+            load_kwargs = {'dataset_path': args.dataset}
+            if args.dataset_split:
+                load_kwargs['split'] = args.dataset_split
+            if args.dataset_config:
+                load_kwargs['dataset_path'] = {
+                    'path': args.dataset,
+                    'name': args.dataset_config
+                }
+            dataset = load_queries_dataset(**load_kwargs)
+        
+        # Apply filters if specified
+        if args.filter_sources:
+            dataset = filter_dataset_by_source(dataset, args.filter_sources)
+        
+        # Sample dataset if specified
+        if args.sample_size:
+            dataset = sample_dataset(dataset, args.sample_size, random_seed=args.random_seed)
+        
+        if len(dataset) == 0:
+            console.print("[red]No data in dataset after filtering/sampling. Exiting.[/red]")
+            return
+            
+    except Exception as e:
+        console.print(f"[red]Failed to load dataset:[/red] {e}")
+        return
+    
+    # Split dataset
+    train_ratio = 1.0 - args.test_ratio
+    train_set, test_set = split_dataset(dataset, train_ratio=train_ratio, random_seed=args.random_seed)
+    
+    if len(test_set) == 0:
+        console.print("[red]No test cases available. Exiting.[/red]")
+        return
+    
+    # Load system prompt
+    system_prompt = load_system_prompt(args.system_prompt)
     if not system_prompt:
         console.print("[red]No system prompt loaded. Exiting.[/red]")
         return
     
     # Initialize LLM client
     try:
-        llm_client = LLMClient(provider=args.provider)
+        llm_client = LLMClient(provider=args.provider, temperature=args.temperature, max_tokens=args.max_tokens)
     except Exception as e:
         console.print(f"[red]Failed to initialize LLM client:[/red] {e}")
         return
     
-    # Handle semantic evaluation setup
-    golden_dataset = None
-    bloodhound_client = None
+    # Display dataset information
+    console.print(Panel(
+        f"[bold cyan]Dataset Information[/bold cyan]\n"
+        f"Total entries: [yellow]{len(dataset)}[/yellow]\n"
+        f"Train set: [green]{len(train_set)}[/green] entries ({len(train_set)/len(dataset)*100:.1f}%)\n"
+        f"Test set: [blue]{len(test_set)}[/blue] entries ({len(test_set)/len(dataset)*100:.1f}%)\n"
+        f"Random seed: [dim]{args.random_seed}[/dim]",
+        title="Dataset Split",
+        border_style="green"
+    ))
     
-    if args.semantic_eval:
-        # Load golden dataset
-        if args.golden_dataset:
-            golden_dataset = load_golden_dataset(args.golden_dataset)
-        else:
-            # Try to find the latest golden dataset
-            dataset_files = find_golden_dataset_files()
-            if dataset_files:
-                console.print(f"[yellow]No golden dataset specified, using latest: {os.path.basename(dataset_files[0])}[/yellow]")
-                golden_dataset = load_golden_dataset(dataset_files[0])
-            else:
-                console.print("[red]No golden dataset found. Please specify --golden-dataset or create one first.[/red]")
-                return
-        
-        if not golden_dataset:
-            console.print("[red]Failed to load golden dataset. Exiting.[/red]")
-            return
-        
-        # Initialize BloodHound client
-        if not all([BHE_DOMAIN, BHE_TOKEN_ID, BHE_TOKEN_KEY]):
-            console.print("[red]BloodHound credentials not configured. Set BHE_DOMAIN, BHE_TOKEN_ID, and BHE_TOKEN_KEY.[/red]")
-            return
-        
-        try:
-            credentials = Credentials(token_id=BHE_TOKEN_ID, token_key=BHE_TOKEN_KEY)
-            bloodhound_client = Client(scheme=BHE_SCHEME, host=BHE_DOMAIN, port=BHE_PORT, credentials=credentials)
-            console.print(f"[green]✓[/green] BloodHound client initialized: {BHE_SCHEME}://{BHE_DOMAIN}:{BHE_PORT}")
-        except Exception as e:
-            console.print(f"[red]Failed to initialize BloodHound client:[/red] {e}")
-            return
-    
-    # Generate queries
-    results = generate_queries_from_descriptions(
-        descriptions=descriptions,
+    # Run evaluation on test set
+    results = generate_queries_from_test_set(
+        test_set=test_set,
         system_prompt=system_prompt,
         llm_client=llm_client,
         validate_syntax=not args.no_validate,
         save_results=not args.no_save,
-        enable_semantic_eval=args.semantic_eval,
-        golden_dataset=golden_dataset,
-        bloodhound_client=bloodhound_client
+        similarity_threshold=args.similarity_threshold
     )
     
     # Final summary
     if results["generation_errors"] == 0 and results["syntax_valid_queries"] == results["successful_generations"]:
-        if results.get("semantic_evaluation_enabled"):
-            if (results["semantic_exact_matches"] + results["semantic_high_similarity"]) == results["semantic_evaluations_performed"]:
-                console.print(Panel(
-                    Text("Perfect evaluation! All queries generated successfully with valid syntax and high semantic accuracy! 🎉", style="bold green"),
-                    title="Perfect Score",
-                    border_style="green"
-                ))
-            else:
-                semantic_accuracy = ((results["semantic_exact_matches"] + results["semantic_high_similarity"]) / 
-                                   max(results["semantic_evaluations_performed"], 1)) * 100
-                console.print(Panel(
-                    Text(f"All queries generated with valid syntax! Semantic accuracy: {semantic_accuracy:.1f}% 🎯", style="bold yellow"),
-                    title="Excellent Syntax, Good Semantics",
-                    border_style="yellow"
-                ))
-        else:
+        if results["exact_matches"] == results["total_test_cases"]:
             console.print(Panel(
-                Text("All queries generated successfully with valid syntax! 🎉", style="bold green"),
-                title="Perfect Syntax Score",
+                Text("Perfect evaluation! All queries generated successfully with exact matches! 🎉", style="bold green"),
+                title="Perfect Score",
                 border_style="green"
             ))
-    elif results.get("semantic_evaluation_enabled") and results["semantic_evaluations_performed"] > 0:
-        semantic_accuracy = ((results["semantic_exact_matches"] + results["semantic_high_similarity"]) / 
-                           results["semantic_evaluations_performed"]) * 100
+        elif (results["exact_matches"] + results["high_similarity_count"]) == results["total_test_cases"]:
+            console.print(Panel(
+                Text("Excellent evaluation! All queries generated with high similarity! 🎯", style="bold yellow"),
+                title="Excellent Score",
+                border_style="yellow"
+            ))
+        else:
+            accuracy_rate = ((results["exact_matches"] + results["high_similarity_count"]) / 
+                           results["total_test_cases"]) * 100
+            console.print(Panel(
+                Text(f"All queries generated with valid syntax! Accuracy: {accuracy_rate:.1f}% 📊", style="bold cyan"),
+                title="Good Syntax, Mixed Accuracy",
+                border_style="cyan"
+            ))
+    else:
+        accuracy_rate = ((results["exact_matches"] + results["high_similarity_count"]) / 
+                       max(results["total_test_cases"], 1)) * 100
         console.print(Panel(
-            Text(f"Evaluation complete! Semantic accuracy: {semantic_accuracy:.1f}% 📊", style="bold cyan"),
+            Text(f"Evaluation complete! Accuracy: {accuracy_rate:.1f}% | Avg Similarity: {results['average_similarity_score']:.3f} 📊", style="bold cyan"),
             title="Evaluation Summary",
             border_style="cyan"
         ))

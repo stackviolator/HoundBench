@@ -7,3 +7,4 @@ neo4j
 openai
 arize-phoenix-otel
 openinference-instrumentation-openai
+datasets
