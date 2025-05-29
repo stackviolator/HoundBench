@@ -133,51 +133,50 @@ def load_system_prompt(file_path: str) -> str:
 
 def extract_query_from_response(response: str) -> str:
     """Extract the Cypher query from the LLM response."""
-    # Look for query tags
-    if "<query>" in response and "</query>" in response:
-        start = response.find("<query>") + 7
-        end = response.find("</query>")
-        extracted_query = response[start:end].strip()
+    # First, remove all content within <think> </think> tags
+    cleaned_response = response
+    while "<think>" in cleaned_response and "</think>" in cleaned_response:
+        think_start = cleaned_response.find("<think>")
+        think_end = cleaned_response.find("</think>") + 8  # +8 to include the closing tag
+        cleaned_response = cleaned_response[:think_start] + cleaned_response[think_end:]
+    
+    # Now look for query tags in the cleaned response
+    if "<query>" in cleaned_response and "</query>" in cleaned_response:
+        start = cleaned_response.find("<query>") + 7
+        end = cleaned_response.find("</query>")
+        extracted_query = cleaned_response[start:end].strip()
         
-        # Additional cleaning: remove any remaining XML-like tags or thinking content
+        # Basic cleaning: remove empty lines but preserve the query structure
         lines = extracted_query.split('\n')
         clean_lines = []
         
         for line in lines:
             line = line.strip()
-            # Skip empty lines and lines that look like XML tags or thinking content
-            if (line and 
-                not line.startswith('<') and 
-                not line.endswith('>') and
-                not line.startswith('tags.') and
-                not line.startswith('</think>')):
+            # Keep non-empty lines
+            if line:
                 clean_lines.append(line)
         
         if clean_lines:
             return '\n'.join(clean_lines)
         else:
-            # If no clean lines found, return the original extracted content
             return extracted_query
     
-    # If no tags found, return the whole response (might be just the query)
-    # But clean it up first
-    lines = response.strip().split('\n')
+    # If no query tags found after removing think tags, try to extract from the remaining content
+    lines = cleaned_response.strip().split('\n')
     clean_lines = []
     
     for line in lines:
         line = line.strip()
-        # Skip lines that look like XML tags or thinking content
+        # Skip empty lines and any remaining XML-like tags
         if (line and 
-            not line.startswith('<') and 
-            not line.endswith('>') and
-            not line.startswith('tags.') and
-            not line.startswith('</think>')):
+            not (line.startswith('<') and line.endswith('>')) and
+            not line.startswith('tags.')):
             clean_lines.append(line)
     
     if clean_lines:
         return '\n'.join(clean_lines)
     else:
-        return response.strip()
+        return cleaned_response.strip()
 
 def generate_queries_from_test_set(
     test_set: Dataset,
@@ -203,7 +202,7 @@ def generate_queries_from_test_set(
     similarity_scores = []
     
     console.print(Panel(
-        f"[bold cyan]LLM Query Generation Evaluation[/bold cyan]\n"
+        f"[bold cyan]HoundBench Evaluation[/bold cyan]\n"
         f"Test Cases: [yellow]{total_test_cases}[/yellow]\n"
         f"LLM Provider: [green]{llm_client.provider.title()}[/green]\n"
         f"Model: [green]{llm_client.model}[/green]\n"
@@ -451,7 +450,7 @@ def generate_queries_from_test_set(
 def display_summary_statistics(results: Dict[str, Any]):
     """Display summary statistics in a nice table."""
     stats_table = Table(
-        title="LLM Query Generation Results",
+        title="HoundBench Results",
         show_header=True,
         header_style="bold cyan"
     )
