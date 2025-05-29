@@ -450,12 +450,17 @@ def generate_queries_from_test_set(
 def display_summary_statistics(results: Dict[str, Any]):
     """Display summary statistics in a nice table."""
     stats_table = Table(
-        title="HoundBench Results",
+        title=f"HoundBench Results - {results['llm_provider'].title()} ({results['llm_model']})",
         show_header=True,
         header_style="bold cyan"
     )
     stats_table.add_column("Metric", style="dim", width=40)
     stats_table.add_column("Value", justify="right")
+    
+    # Add model information at the top
+    stats_table.add_row("LLM Provider", results["llm_provider"].title())
+    stats_table.add_row("Model", results["llm_model"])
+    stats_table.add_row("", "")  # Separator
     
     stats_table.add_row("Total Test Cases", str(results["total_test_cases"]))
     stats_table.add_row(
@@ -556,12 +561,81 @@ def save_evaluation_results(results: Dict[str, Any]):
                 border_style="green"
             ))
         
+        # Save stats summary for analysis
+        save_stats_summary(results)
+        
     except Exception as e:
         console.print(Panel(
             Text(f"Failed to save results: {e}", style="bold red"),
             title="Save Error",
             border_style="red"
         ))
+
+def save_stats_summary(results: Dict[str, Any]):
+    """Save a summary of evaluation statistics to a separate file for analysis."""
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    
+    # Calculate derived metrics
+    syntax_success_rate = 0.0
+    if results["successful_generations"] > 0:
+        syntax_success_rate = (results["syntax_valid_queries"] / results["successful_generations"]) * 100
+    
+    accuracy_rate = 0.0
+    if results["total_test_cases"] > 0:
+        accuracy_rate = ((results["exact_matches"] + results["high_similarity_count"]) / 
+                        results["total_test_cases"]) * 100
+    
+    avg_time_per_case = 0.0
+    if results["total_test_cases"] > 0:
+        avg_time_per_case = results["total_runtime"] / results["total_test_cases"]
+    
+    # Create summary stats
+    stats_summary = {
+        "evaluation_timestamp": results["evaluation_timestamp"],
+        "llm_provider": results["llm_provider"],
+        "llm_model": results["llm_model"],
+        "total_test_cases": results["total_test_cases"],
+        "successful_generations": results["successful_generations"],
+        "generation_errors": results["generation_errors"],
+        "syntax_validation_enabled": results["syntax_validation_enabled"],
+        "syntax_valid_queries": results["syntax_valid_queries"],
+        "syntax_invalid_queries": results["syntax_invalid_queries"],
+        "syntax_success_rate_percent": round(syntax_success_rate, 2),
+        "similarity_threshold": results["similarity_threshold"],
+        "exact_matches": results["exact_matches"],
+        "high_similarity_count": results["high_similarity_count"],
+        "medium_similarity_count": results["medium_similarity_count"],
+        "low_similarity_count": results["low_similarity_count"],
+        "accuracy_rate_percent": round(accuracy_rate, 2),
+        "average_similarity_score": round(results["average_similarity_score"], 4),
+        "total_runtime_seconds": round(results["total_runtime"], 2),
+        "average_time_per_case_seconds": round(avg_time_per_case, 2)
+    }
+    
+    # Save stats summary
+    stats_file = os.path.join(OUTPUT_DIR, f'eval_stats_{results["llm_provider"]}_{results["llm_model"].replace("/", "_")}_{timestamp}.json')
+    
+    try:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        
+        with open(stats_file, 'w') as f:
+            json.dump(stats_summary, f, indent=2)
+        
+        console.print(Panel(
+            Text(f"Evaluation stats saved to:\n{stats_file}", style="bold magenta"),
+            title="Stats Summary Saved",
+            border_style="magenta"
+        ))
+        
+        return stats_file
+        
+    except Exception as e:
+        console.print(Panel(
+            Text(f"Failed to save stats summary: {e}", style="bold red"),
+            title="Stats Save Error",
+            border_style="red"
+        ))
+        return None
 
 def main():
     """Main entry point."""
@@ -825,16 +899,18 @@ Examples:
     )
     
     # Final summary
+    model_info = f"{results['llm_provider'].title()} {results['llm_model']}"
+    
     if results["generation_errors"] == 0 and results["syntax_valid_queries"] == results["successful_generations"]:
         if results["exact_matches"] == results["total_test_cases"]:
             console.print(Panel(
-                Text("Perfect evaluation! All queries generated successfully with exact matches! 🎉", style="bold green"),
+                Text(f"Perfect evaluation with {model_info}! All queries generated successfully with exact matches! 🎉", style="bold green"),
                 title="Perfect Score",
                 border_style="green"
             ))
         elif (results["exact_matches"] + results["high_similarity_count"]) == results["total_test_cases"]:
             console.print(Panel(
-                Text("Excellent evaluation! All queries generated with high similarity! 🎯", style="bold yellow"),
+                Text(f"Excellent evaluation with {model_info}! All queries generated with high similarity! 🎯", style="bold yellow"),
                 title="Excellent Score",
                 border_style="yellow"
             ))
@@ -842,7 +918,7 @@ Examples:
             accuracy_rate = ((results["exact_matches"] + results["high_similarity_count"]) / 
                            results["total_test_cases"]) * 100
             console.print(Panel(
-                Text(f"All queries generated with valid syntax! Accuracy: {accuracy_rate:.1f}% 📊", style="bold cyan"),
+                Text(f"All queries generated with valid syntax using {model_info}! Accuracy: {accuracy_rate:.1f}% 📊", style="bold cyan"),
                 title="Good Syntax, Mixed Accuracy",
                 border_style="cyan"
             ))
@@ -850,7 +926,7 @@ Examples:
         accuracy_rate = ((results["exact_matches"] + results["high_similarity_count"]) / 
                        max(results["total_test_cases"], 1)) * 100
         console.print(Panel(
-            Text(f"Evaluation complete! Accuracy: {accuracy_rate:.1f}% | Avg Similarity: {results['average_similarity_score']:.3f} 📊", style="bold cyan"),
+            Text(f"Evaluation complete with {model_info}! Accuracy: {accuracy_rate:.1f}% | Avg Similarity: {results['average_similarity_score']:.3f} 📊", style="bold cyan"),
             title="Evaluation Summary",
             border_style="cyan"
         ))

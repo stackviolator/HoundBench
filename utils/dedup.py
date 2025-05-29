@@ -13,7 +13,7 @@ usage
     # write a new file with duplicates removed
     python dedup_queries.py queries.json --output pruned.json
 
-    # overwrite the original file in‑place (be careful!)
+    # overwrite the original file in-place (be careful!)
     python dedup_queries.py queries.json --inplace
 """
 
@@ -64,7 +64,7 @@ def main():
 
     items = json.loads(data_path.read_text(encoding="utf-8"))
     if not isinstance(items, list):
-        sys.exit("error: top‑level JSON element must be a list")
+        sys.exit("error: top-level JSON element must be a list")
 
     dupes = find_duplicates(items)
     report(dupes, items)

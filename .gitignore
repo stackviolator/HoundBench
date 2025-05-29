@@ -302,6 +302,10 @@ datasets/
 *.xlsx
 *.xls
 
+# Evaluation stats files
+eval_stats_*.json
+evaluation_stats_*.json
+
 # Backup files
 *.bak
 *.backup

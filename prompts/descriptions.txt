@@ -12,7 +12,7 @@ Discover ADCS paths where enrollment is allowed but no approval workflow is enfo
 Find computers with duplicate SPNs (indicative of misconfiguration)
 Identify misaligned trust relationships between domains (e.g., stale external trusts)
 Detect certificate templates allowing client authentication without EKU restrictions
-List all ACLs that allow any principal to change a computer’s DNS hostname
+List all ACLs that allow any principal to change a computer's DNS hostname
 Highlight expired but enabled computer accounts
 Identify users with stealthy DACL-based persistence (WriteDACL without admin rights)
 Show GPOs with unlinked but still active policies
