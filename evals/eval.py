@@ -580,13 +580,13 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic evaluation with default local dataset
+  # Basic evaluation with default local dataset (uses entire dataset for testing)
   python eval.py
   
   # Use a different local JSON file
   python eval.py --dataset /path/to/custom_queries.json
   
-  # Load from Hugging Face Hub
+  # Load from Hugging Face Hub (uses entire dataset for testing)
   python eval.py --dataset "username/cypher-queries-dataset"
   
   # Load specific split from HF dataset
@@ -601,11 +601,14 @@ Examples:
   # Sample 50 random examples for quick testing
   python eval.py --sample-size 50
   
+  # Split dataset into train/test (85/15 by default)
+  python eval.py --split-dataset
+  
+  # Custom train/test split ratio (requires --split-dataset)
+  python eval.py --split-dataset --test-ratio 0.2
+  
   # Generate without syntax validation
   python eval.py --no-validate
-  
-  # Custom train/test split ratio
-  python eval.py --test-ratio 0.2
   
   # Use custom system prompt
   python eval.py --system-prompt /path/to/prompt.txt
@@ -674,6 +677,12 @@ Examples:
     )
     
     parser.add_argument(
+        "--split-dataset",
+        action="store_true",
+        help="Split the dataset into train/test sets. If not specified, uses entire dataset for testing."
+    )
+    
+    parser.add_argument(
         "--random-seed",
         type=int,
         default=42,
@@ -724,6 +733,9 @@ Examples:
         console.print("[red]Error: similarity-threshold must be between 0 and 1[/red]")
         return
     
+    if args.test_ratio != 0.15 and not args.split_dataset:
+        console.print("[yellow]Warning: test-ratio specified but --split-dataset not used. test-ratio will be ignored.[/yellow]")
+    
     # Load dataset
     console.print(Panel(
         Text("Loading and preparing dataset...", style="bold cyan"),
@@ -766,8 +778,12 @@ Examples:
         return
     
     # Split dataset
-    train_ratio = 1.0 - args.test_ratio
-    train_set, test_set = split_dataset(dataset, train_ratio=train_ratio, random_seed=args.random_seed)
+    if args.split_dataset:
+        train_ratio = 1.0 - args.test_ratio
+        train_set, test_set = split_dataset(dataset, train_ratio=train_ratio, random_seed=args.random_seed)
+    else:
+        train_set = dataset
+        test_set = dataset
     
     if len(test_set) == 0:
         console.print("[red]No test cases available. Exiting.[/red]")
@@ -789,11 +805,13 @@ Examples:
     # Display dataset information
     console.print(Panel(
         f"[bold cyan]Dataset Information[/bold cyan]\n"
-        f"Total entries: [yellow]{len(dataset)}[/yellow]\n"
-        f"Train set: [green]{len(train_set)}[/green] entries ({len(train_set)/len(dataset)*100:.1f}%)\n"
-        f"Test set: [blue]{len(test_set)}[/blue] entries ({len(test_set)/len(dataset)*100:.1f}%)\n"
-        f"Random seed: [dim]{args.random_seed}[/dim]",
-        title="Dataset Split",
+        f"Total entries: [yellow]{len(dataset)}[/yellow]\n" +
+        (f"Train set: [green]{len(train_set)}[/green] entries ({len(train_set)/len(dataset)*100:.1f}%)\n"
+         f"Test set: [blue]{len(test_set)}[/blue] entries ({len(test_set)/len(dataset)*100:.1f}%)\n"
+         f"Random seed: [dim]{args.random_seed}[/dim]" if args.split_dataset else
+         f"Using entire dataset for testing: [blue]{len(test_set)}[/blue] entries\n"
+         f"[dim]No train/test split applied[/dim]"),
+        title="Dataset Configuration",
         border_style="green"
     ))
     
