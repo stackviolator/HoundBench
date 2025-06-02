@@ -1198,5 +1198,310 @@
     "description": "Where can owned users RDP",
     "query": "MATCH p=(m:User {owned: true})-[r:MemberOf|CanRDP*1..]->(n:Computer) RETURN p",
     "source": "https://raw.githubusercontent.com/ZephrFish/Bloodhound-CustomQueries/refs/heads/main/customqueries.json"
+  },
+  {
+    "description": "All Computers in Domain Admins group",
+    "query": "MATCH p = (c:Computer)-[:MemberOf]->(g:Group) WHERE toUpper(g.name) STARTS WITH 'DOMAIN ADMINS' OR g.objectid ENDS WITH '-512' RETURN p",
+    "source": "https://blog.compass-security.com/2020/07/make-the-most-out-of-bloodhound/"
+  },
+  {
+    "description": "All Computers that are local administrators to another computer",
+    "query": "MATCH p = (c1:Computer)-[:AdminTo]->(c2:Computer) RETURN p",
+    "source": "https://blog.compass-security.com/2020/07/make-the-most-out-of-bloodhound/"
+  },
+  {
+    "description": "Domains with Machine Account Quota > 0",
+    "query": "MATCH (d:Domain) WHERE toInteger(d.machineaccountquota) > 0 RETURN d",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Interesting objects by sensitive keywords in name / description",
+    "query": "UNWIND ['admin','empfindlich','geheim','important','azure','MSOL','kennwort','pass','secret','sensib','sensitiv','wichtig','backdoor','honey'] AS word MATCH p = (:Domain)-[:Contains*1..]->(b:Base) WHERE toLower(b.name) CONTAINS toLower(word) OR toLower(b.description) CONTAINS toLower(word) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Users with clear‑text password attributes (userpassword / unixpassword / sfupassword / unicodepassword)",
+    "query": "MATCH p = (:Domain)-[:Contains*1..]->(u:User) WHERE u.userpassword <> '' OR u.unixpassword <> '' OR u.sfupassword <> '' OR u.unicodepassword <> '' RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Users whose passwords are stored with reversible encryption",
+    "query": "MATCH p = (:Domain)-[:Contains*1..]->(:Base {encryptedtextpwdallowed: true}) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Users with the same sAMAccountName in different domains",
+    "query": "MATCH p = (:Domain)-[:Contains*1..]->(u1:User),(u2:User) WHERE u1.samaccountname = u2.samaccountname AND u1.domain <> u2.domain RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Tier 0 objects (any node tagged admin_tier_0)",
+    "query": "MATCH p = (:Domain)-[:Contains*1..]->(n:Base) WHERE 'admin_tier_0' IN split(n.system_tags,' ') RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Tier 0 users",
+    "query": "MATCH p = (u:User)-[:MemberOf]->(:Base) WHERE 'admin_tier_0' IN split(u.system_tags,' ') RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Tier 0 computers",
+    "query": "MATCH p = (c:Computer)-[:MemberOf]->(:Base) WHERE 'admin_tier_0' IN split(c.system_tags,' ') RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Users in the Protected Users group",
+    "query": "MATCH p = (:Base)-[:MemberOf*1..]->(:Group {samaccountname:'Protected Users'}) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Users marked ‘Account is sensitive and cannot be delegated’",
+    "query": "MATCH p = (:Base {sensitive:true})-[:MemberOf*1..]->(:Group) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Tier 0 user logons on non‑Tier 0 computers",
+    "query": "MATCH p = (c:Computer)-[:HasSession*1..]->(u:User) WHERE 'admin_tier_0' IN split(u.system_tags,' ') AND (NOT 'admin_tier_0' IN split(c.system_tags,' ') OR c.system_tags IS NULL) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Non‑Tier 0 principals with local‑admin rights",
+    "query": "MATCH p = (b:Base)-[:AdminTo]->(:Computer) WHERE NOT 'admin_tier_0' IN split(b.system_tags,' ') OR b.system_tags IS NULL RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Non‑Tier 0 principals with DCSync capability",
+    "query": "MATCH p = allShortestPaths((b:Base)-[:MemberOf|GenericAll|DCSync*1..]->(d:Domain)) WHERE b <> d AND (NOT 'admin_tier_0' IN split(b.system_tags,' ') OR b.system_tags IS NULL) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Non‑Tier 0 principals that can read LAPS passwords",
+    "query": "MATCH p = (b:Base)-[:AllExtendedRights|ReadLAPSPassword]->(:Computer) WHERE NOT 'admin_tier_0' IN split(b.system_tags,' ') OR b.system_tags IS NULL RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Non‑Tier 0 principals with RDP/administrative access",
+    "query": "MATCH p = (b:Base)-[:AdminTo]->(:Computer) WHERE NOT 'admin_tier_0' IN split(b.system_tags,' ') OR b.system_tags IS NULL RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Computers that belong to Tier 0 groups",
+    "query": "MATCH p = (:Computer {isdc:false})-[:MemberOf*1..]->(g:Group) WHERE 'admin_tier_0' IN split(g.system_tags,' ') RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "LAPS passwords readable by non‑admin principals",
+    "query": "MATCH p = (b:Base)-[:AllExtendedRights|ReadLAPSPassword|GenericAll]->(:Computer {haslaps:true}) WHERE NOT 'admin_tier_0' IN split(b.system_tags,' ') OR b.system_tags IS NULL RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "LAPS passwords readable via owned principals",
+    "query": "MATCH p = (u)-[:MemberOf*1..]->(:Group)-[:GenericAll]->(t:Computer {haslaps:true}) WHERE 'owned' IN split(u.system_tags,' ') RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Principals with ACL rights over computers (excluding Tier 0)",
+    "query": "MATCH p = (b)-[{isacl:true}]->(:Computer) WHERE (b:User OR b:Computer OR b:Group) AND (NOT 'admin_tier_0' IN split(b.system_tags,' ') OR b.system_tags IS NULL) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "dMSA accounts controlled by non‑Tier 0 principals (BadSuccessor)",
+    "query": "MATCH p = (d:Computer)<-[:WriteDacl|Owns|GenericAll|GenericWrite|WriteOwner]-(n:Base) WHERE d.`msds-delegatedmsastate` IS NOT NULL AND (NOT 'admin_tier_0' IN split(n.system_tags,' ') OR n.system_tags IS NULL) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Interesting GPOs by keyword",
+    "query": "UNWIND ['firewall','defender','vpn','laps','antivirus','cyberark','powershell','msc','edr','sentinel'] AS word MATCH p = (g:GPO)-[:GPLink*1..]->(:Base) WHERE toLower(g.name) CONTAINS toLower(word) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Non‑admin principals with dangerous GPO permissions",
+    "query": "MATCH p = (u:User)-[:AddMember|AddSelf|WriteSPN|AddKeyCredentialLink|AllExtendedRights|ForceChangePassword|GenericAll|GenericWrite|WriteDacl|WriteOwner|Owns]->(:GPO) WHERE NOT 'admin_tier_0' IN split(u.system_tags,' ') OR u.system_tags IS NULL RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Published certificate templates",
+    "query": "MATCH p = (ct:CertTemplate)-[:PublishedTo]->(:EnterpriseCA) RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "ESC 1/3/4/13 certificate‑template abuse paths from non‑Tier 0 principals",
+    "query": "MATCH p = (b)-[:ADCSESC1|ADCSESC3|ADCSESC4|ADCSESC13]->() WHERE NOT 'admin_tier_0' IN split(b.system_tags,' ') OR b.system_tags IS NULL RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "ESC15 (EKUwu) vulnerable certificate‑template chains",
+    "query": "MATCH p = (:Base)-[:Enroll|AllExtendedRights]->(ct:CertTemplate)-[:PublishedTo]->(:EnterpriseCA)-[:TrustedForNTAuth]->(:NTAuthStore)-[:NTAuthStoreFor]->(:Domain) WHERE ct.enrolleesuppliessubject = true AND ct.authenticationenabled = false AND ct.requiresmanagerapproval = false AND ct.schemaversion = 1 RETURN p",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_CE_Custom_Queries.md"
+  },
+  {
+    "description": "Principals in Server / Account / Print Operators (SIDs ‑548, ‑549, ‑550) that are **not** yet tagged Tier 0",
+    "query": "MATCH (g:Group) WHERE (g.system_tags IS NULL OR NOT 'admin_tier_0' IN split(g.system_tags,' ')) AND (g.objectid =~ '(?i).*S-1-5-.*-548' OR g.objectid =~ '(?i).*S-1-5-.*-549' OR g.objectid =~ '(?i).*S-1-5-.*-550') RETURN g",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Principals with direct DCSync privilege on a Domain (not yet Tier 0)",
+    "query": "MATCH (n)-[:DCSync|AllExtendedRights|GenericAll]->(:Domain) WHERE (n.system_tags IS NULL OR NOT 'admin_tier_0' IN split(n.system_tags,' ')) RETURN n",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Principals with DCSync **or** GetChanges / GetChangesAll on Domain (not yet Tier 0)",
+    "query": "MATCH (n)-[:DCSync|AllExtendedRights|GenericAll|GetChanges|GetChangesAll]->(:Domain) WHERE (n.system_tags IS NULL OR NOT 'admin_tier_0' IN split(n.system_tags,' ')) RETURN n",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Users or computers with Unconstrained Delegation that are not Tier 0",
+    "query": "MATCH (n) WHERE (n:User OR n:Computer) AND n.unconstraineddelegation = true AND (n.system_tags IS NULL OR NOT 'admin_tier_0' IN split(n.system_tags,' ')) RETURN n",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Principals with Local‑Admin (`AdminTo`) or `ForceChangePassword` rights (not Tier 0)",
+    "query": "MATCH (n)-[:AdminTo|ForceChangePassword]->(b) WHERE (n.system_tags IS NULL OR NOT 'admin_tier_0' IN split(n.system_tags,' ')) RETURN n",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Principals with privileged rights on computers (GenericAll, WriteDacl, etc.) not tagged Tier 0",
+    "query": "MATCH (n)-[:AllowedToDelegate|ExecuteDCOM|ForceChangePassword|GenericAll|GenericWrite|Owns|WriteDacl|WriteOwner]->(:Computer) WHERE (n.system_tags IS NULL OR NOT 'admin_tier_0' IN split(n.system_tags,' ')) RETURN n",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Principals with rights over Cert Publishers group (SID ‑517) that are not Tier 0",
+    "query": "MATCH (n)-[:GenericAll|GenericWrite|MemberOf|Owns|WriteDacl|WriteOwner]->(g:Group) WHERE g.objectid =~ '(?i).*S-1-5-21-.*-517' AND (n.system_tags IS NULL OR NOT 'admin_tier_0' IN split(n.system_tags,' ')) RETURN n",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Principals who belong to Tier 0 groups but lack the Tier 0 tag",
+    "query": "MATCH (n)-[:MemberOf*1..]->(g:Group) WHERE (n.system_tags IS NULL OR NOT 'admin_tier_0' IN split(n.system_tags,' ')) AND g.system_tags CONTAINS 'admin_tier_0' RETURN n",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Tier 0‑tagged users / computers that are disabled or inactive > 180 days",
+    "query": "MATCH (uc) WHERE uc.system_tags CONTAINS 'admin_tier_0' AND ((uc:User AND uc.enabled = false) OR (uc:Computer AND ((uc.enabled = false) OR (uc.lastlogon > 0 AND uc.lastlogon < (timestamp()/1000 - 15552000)) OR (uc.lastlogontimestamp > 0 AND uc.lastlogontimestamp < (timestamp()/1000 - 15552000))))) RETURN uc",
+    "source": "https://raw.githubusercontent.com/CompassSecurity/bloodhoundce-resources/refs/heads/main/custom_queries/BloodHound_Operator_Custom_Queries.md"
+  },
+  {
+    "description": "Groups with foreign‑domain group membership",
+    "query": "MATCH p=(n:Group {domain:$result})-[:MemberOf]->(m:Group) WHERE m.domain <> n.domain AND n.name <> m.name RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Kerberoastable members of high‑value groups",
+    "query": "MATCH p = shortestPath((n:User)-[:MemberOf]->(g:Group)) WHERE g.highvalue = true AND n.hasspn = true RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Kerberoastable users ordered by count of computers they can locally admin",
+    "query": "MATCH (u:User {hasspn:true}) OPTIONAL MATCH (u)-[:AdminTo]->(c1:Computer) OPTIONAL MATCH (u)-[:MemberOf*1..]->(:Group)-[:AdminTo]->(c2:Computer) WITH u, COLLECT(c1) + COLLECT(c2) AS allComps UNWIND allComps AS comp RETURN u, COUNT(DISTINCT comp) AS adminCount ORDER BY adminCount DESC",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Shortest paths to Domain Admins from Kerberoastable users",
+    "query": "MATCH p = shortestPath((n:User {hasspn:true})-[:{}*1..]->(m:Group {name:$result})) RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Members of high‑privileged Azure AD roles",
+    "query": "MATCH p = (n)-[:AZHasRole|AZMemberOf*1..2]->(r:AZRole) WHERE r.displayname =~ '(?i)Global Administrator|User Administrator|Cloud Application Administrator|Authentication Policy Administrator|Exchange Administrator|Helpdesk Administrator|Privileged Authentication Administrator' RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "On‑prem‑synced users in high‑privileged Azure AD roles",
+    "query": "MATCH p = (n)-[:AZHasRole|AZMemberOf*1..2]->(r:AZRole) WHERE n.onpremisesyncenabled = true AND r.displayname =~ '(?i)Global Administrator|User Administrator|Cloud Application Administrator|Authentication Policy Administrator|Exchange Administrator|Helpdesk Administrator|Privileged Authentication Administrator' RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Azure users with a path to high‑value targets",
+    "query": "MATCH (m:AZUser), (n {highvalue:true}), p = shortestPath((m)-[r*1..]->(n)) WHERE NONE (rel IN relationships(p) WHERE type(rel) IN ['GetChanges','GetChangesAll']) AND m <> n RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "On‑prem‑synced Azure users with paths to high‑value targets",
+    "query": "MATCH (m:AZUser) WHERE m.onpremisesyncenabled = true WITH m MATCH (n {highvalue:true}), p = shortestPath((m)-[r*1..]->(n)) WHERE NONE (rel IN relationships(p) WHERE type(rel) IN ['GetChanges','GetChangesAll']) AND m <> n RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Shortest paths to privileged Azure AD roles",
+    "query": "MATCH (role:AZRole) WHERE role.displayname =~ '(?i)Global Administrator|User Administrator|Cloud Application Administrator|Authentication Policy Administrator|Exchange Administrator|Helpdesk Administrator|Privileged Authentication Administrator' WITH role MATCH (m), p = shortestPath((m)-[r*1..]->(role)) WHERE m <> role RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Azure applications with paths to high‑value targets",
+    "query": "MATCH (app:AZApp), (target {highvalue:true}), p = shortestPath((app)-[r*1..]->(target)) WHERE NONE (rel IN relationships(p) WHERE type(rel) IN ['GetChanges','GetChangesAll']) AND app <> target RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Shortest paths to Azure subscriptions",
+    "query": "MATCH (sub:AZSubscription) WITH sub MATCH (m), p = shortestPath((m)-[r*1..]->(sub)) WHERE m <> sub RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Shortest paths from **owned** principals to privileged Azure AD roles",
+    "query": "MATCH (role:AZRole) WHERE role.displayname =~ '(?i)Global Administrator|User Administrator|Cloud Application Administrator|Authentication Policy Administrator|Exchange Administrator|Helpdesk Administrator|Privileged Authentication Administrator' WITH role MATCH (m {owned:true}), p = shortestPath((m)-[r*1..]->(role)) WHERE m <> role RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Service principals that can grant arbitrary app roles via MS Graph",
+    "query": "MATCH p = (sp)-[:AZMGGrantAppRoles]->(t:AZTenant) RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Service principals with MS Graph app‑role assignment permissions",
+    "query": "MATCH p = (sp:AZServicePrincipal)-[:AZMGAppRoleAssignment_ReadWrite_All|AZMGApplication_ReadWrite_All|AZMGDirectory_ReadWrite_All|AZMGGroupMember_ReadWrite_All|AZMGGroup_ReadWrite_All|AZMGRoleManagement_ReadWrite_Directory|AZMGServicePrincipalEndpoint_ReadWrite_All]->(:AZServicePrincipal) RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Direct controllers of Microsoft Graph service principal",
+    "query": "MATCH p = (n)-[:AZAddOwner|AZAddSecret|AZAppAdmin|AZCloudAppAdmin|AZMGAddOwner|AZMGAddSecret|AZOwns]->(g:AZServicePrincipal {appdisplayname:'Microsoft Graph'}) RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Shortest paths to Microsoft Graph service principal",
+    "query": "MATCH p = shortestPath((n)-[r*1..]->(g:AZServicePrincipal {appdisplayname:'Microsoft Graph'})) WHERE n <> g RETURN p",
+    "source": "https://raw.githubusercontent.com/SpecterOps/BloodHound-Legacy/refs/heads/master/src/components/SearchContainer/Tabs/PrebuiltQueries.json"
+  },
+  {
+    "description": "Return every node in the BloodHound graph",
+    "query": "MATCH (n) RETURN n",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
+  },
+  {
+    "description": "Return every User node",
+    "query": "MATCH (u:User) RETURN u",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
+  },
+  {
+    "description": "Nodes where the custom property `test` exists (any value)",
+    "query": "MATCH (n) WHERE exists(n.test) RETURN n",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
+  },
+  {
+    "description": "Nodes where the custom property `test` is **missing**",
+    "query": "MATCH (n) WHERE NOT exists(n.test) RETURN n",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
+  },
+  {
+    "description": "Nodes whose property `test` equals `helloWorld`",
+    "query": "MATCH (n) WHERE n.test = 'helloWorld' RETURN n",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
+  },
+  {
+    "description": "All sessions of all users (any domain)",
+    "query": "MATCH p = (:Computer)-[:HasSession*1..]->(:User) RETURN p",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
+  },
+  {
+    "description": "All logged‑in admins (user has a session on a computer they administer)",
+    "query": "MATCH (c:Computer)-[:HasSession]->(u:User) WITH c,u MATCH p = shortestPath((u)-[:AdminTo|MemberOf*1..]->(c)) RETURN p",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
+  },
+  {
+    "description": "Users who are **direct** members of a selected group",
+    "query": "MATCH p = (u:User)-[:MemberOf*1..1]->(g:Group {name:$result}) RETURN p",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
+  },
+  {
+    "description": "Users ≤ 3 hops from local‑admin rights on a selected computer",
+    "query": "MATCH p = (u:User)-[:MemberOf|AdminTo*1..3]->(c:Computer {name:$result}) RETURN p",
+    "source": "https://raw.githubusercontent.com/SadProcessor/Cheats/refs/heads/master/DogWhispererV2.md"
   }
 ]

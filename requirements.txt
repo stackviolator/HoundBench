@@ -8,3 +8,9 @@ openai
 arize-phoenix-otel
 openinference-instrumentation-openai
 datasets
+aiohttp>=3.8.0
+asyncio
+argparse
+pathlib
+typing
+datetime

@@ -22,6 +22,7 @@ from phoenix.otel import register
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.cypher_validator import validate_query, ValidationResult
+from utils.schema_loader import load_schema, test_schema_connection
 from utils.dataset_utils import (
     load_queries_dataset, 
     split_dataset, 
@@ -54,6 +55,13 @@ SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.8"))
 EXACT_MATCH_WEIGHT = float(os.getenv("EXACT_MATCH_WEIGHT", "0.4"))
 TOKEN_SIMILARITY_WEIGHT = float(os.getenv("TOKEN_SIMILARITY_WEIGHT", "0.3"))
 STRUCTURAL_SIMILARITY_WEIGHT = float(os.getenv("STRUCTURAL_SIMILARITY_WEIGHT", "0.3"))
+
+# Neo4j Configuration for schema loading
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "changethispassword")
+NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+INCLUDE_SCHEMA = os.getenv("INCLUDE_SCHEMA", "true").lower() == "true"
 
 # File paths
 SYSTEM_PROMPT_FILE = os.path.join(os.path.dirname(__file__), '..', 'prompts', 'system_prompt.txt')
@@ -115,13 +123,40 @@ class LLMClient:
         
         return "ERROR: Unsupported provider"
 
-def load_system_prompt(file_path: str) -> str:
-    """Load the system prompt from file."""
+def load_system_prompt(file_path: str, include_schema: bool = INCLUDE_SCHEMA) -> str:
+    """Load the system prompt from file and optionally include Neo4j schema."""
     try:
         with open(file_path, 'r') as f:
             system_prompt = f.read().strip()
         
         console.print(f"[green]✓[/green] Loaded system prompt from {file_path}")
+        
+        # Add schema information if requested
+        if include_schema:
+            console.print("[dim]Attempting to load Neo4j schema...[/dim]")
+
+            # Test connection first
+            connection_success, connection_message = test_schema_connection()
+
+            print(f"connection_success: {connection_success}")
+            
+            if connection_success:
+                schema_text = load_schema(
+                    show_progress=True
+                )
+                
+                if schema_text and "could not be retrieved" not in schema_text and "Schema loading failed" not in schema_text:
+                    # Add schema to system prompt
+                    system_prompt += f"\n\n# Neo4j Database Schema\n\nThe Neo4j database has the following schema:\n\n{schema_text}\n\nUse this schema information when generating Cypher queries to ensure you reference the correct node labels, relationship types, and properties."
+                    console.print("[green]✓[/green] Schema successfully included in system prompt")
+                else:
+                    console.print("[yellow]⚠[/yellow] Schema could not be loaded, continuing without schema")
+            else:
+                console.print(f"[yellow]⚠[/yellow] Neo4j connection failed: {connection_message}")
+                console.print("[dim]Continuing without schema information[/dim]")
+        else:
+            console.print("[dim]Schema inclusion disabled[/dim]")
+        
         return system_prompt
         
     except FileNotFoundError:
@@ -694,6 +729,16 @@ Examples:
   
   # Don't save results
   python eval.py --no-save
+  
+  # Neo4j Schema Configuration:
+  # Disable schema loading (use static prompt only)
+  python eval.py --no-schema
+  
+  # Use custom Neo4j connection
+  python eval.py --neo4j-uri bolt://myserver:7687 --neo4j-user admin --neo4j-password mypass
+  
+  # Use different Neo4j database
+  python eval.py --neo4j-database bloodhound
         """
     )
     
@@ -795,6 +840,37 @@ Examples:
         help=f"Maximum tokens for LLM generation (default: {LLM_MAX_TOKENS})"
     )
     
+    # Neo4j Schema Configuration
+    parser.add_argument(
+        "--neo4j-uri",
+        default=NEO4J_URI,
+        help=f"Neo4j connection URI (default: {NEO4J_URI})"
+    )
+    
+    parser.add_argument(
+        "--neo4j-user",
+        default=NEO4J_USER,
+        help=f"Neo4j username (default: {NEO4J_USER})"
+    )
+    
+    parser.add_argument(
+        "--neo4j-password",
+        default=NEO4J_PASSWORD,
+        help="Neo4j password (default: from NEO4J_SECRET env var)"
+    )
+    
+    parser.add_argument(
+        "--neo4j-database",
+        default=NEO4J_DATABASE,
+        help=f"Neo4j database name (default: {NEO4J_DATABASE})"
+    )
+    
+    parser.add_argument(
+        "--no-schema",
+        action="store_true",
+        help="Disable automatic schema loading and inclusion in system prompt"
+    )
+    
     args = parser.parse_args()
     
     # Validate arguments
@@ -863,7 +939,12 @@ Examples:
         return
     
     # Load system prompt
-    system_prompt = load_system_prompt(args.system_prompt)
+    include_schema = not args.no_schema
+    
+    system_prompt = load_system_prompt(
+        args.system_prompt, 
+        include_schema=include_schema
+    )
     if not system_prompt:
         console.print("[red]No system prompt loaded. Exiting.[/red]")
         return

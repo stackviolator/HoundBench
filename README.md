@@ -1,332 +1,301 @@
-# HoundBench - Cypher Query Evaluation & Validation
+# Chain-of-Thought Trace Generator for Model Distillation
 
-A comprehensive toolkit for evaluating and validating Cypher queries against BloodHound instances, featuring both offline syntax validation and live query execution testing.
+This repository contains tools for generating Chain-of-Thought (CoT) reasoning traces from large language models (like GPT-4/o3) to create training data for model distillation. The system is specifically designed for BloodHound Cypher query generation but can be adapted for other domains.
 
-## Features
+## Overview
 
-### 🔍 **Cypher Query Validation**
-- **Offline Syntax Validation**: Fast ANTLR-based syntax checking without database connection
-- **Online Semantic Validation**: Neo4j EXPLAIN-based validation for semantic correctness
-- **Pre-execution Validation**: Automatic syntax checking before running queries against BloodHound
-- **Rich Console Output**: Beautiful, color-coded validation results with detailed error reporting
+The system works by:
+1. Taking query descriptions and their corresponding Cypher queries
+2. Prompting a large model to generate detailed reasoning traces
+3. Processing the traces into various training data formats
+4. Preparing the data for training smaller models through distillation
 
-### 📊 **Query Execution & Evaluation**
-- **BloodHound API Integration**: Execute queries against live BloodHound instances
-- **Comprehensive Statistics**: Detailed performance metrics and success/failure rates
-- **Error Classification**: Distinguish between syntax errors, execution errors, and empty results
-- **Rate Limiting**: Configurable delays between queries to prevent API overload
+## Files
 
-### 🤖 **LLM Query Generation**
-- **AI-Powered Query Creation**: Generate Cypher queries from natural language descriptions using LLMs
-- **Multiple LLM Providers**: Support for OpenAI GPT models (extensible to other providers)
-- **Automatic Validation**: Built-in syntax validation of generated queries
-- **Evaluation Metrics**: Track generation success rates and syntax validity
-- **Batch Processing**: Generate queries for entire description datasets
-
-### 📁 **Data Management**
-- **Query Dataset**: Curated collection of BloodHound Cypher queries with descriptions
-- **Failed Query Tracking**: Automatic saving of failed queries with error details
-- **Timestamped Reports**: Organized output files for analysis and debugging
+- `generate_cot_traces.py` - Main script for generating CoT traces
+- `prepare_training_data.py` - Script to process traces into training formats
+- `example_usage.py` - Examples showing how to use the system
+- `config.yaml` - Configuration file for different models and settings
+- `requirements.txt` - Python dependencies
+- `data/queries.json` - Input dataset with BloodHound queries
 
 ## Installation
 
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd HoundBench
-   ```
-
-2. **Create and activate virtual environment**:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
-
-3. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Configure environment variables**:
-   Create a `.env` file in the project root:
-   ```env
-   # BloodHound API Configuration
-   BHE_DOMAIN=your-bloodhound-domain.com
-   BHE_PORT=443
-   BHE_SCHEME=https
-   BHE_TOKEN_ID=your-token-id
-   BHE_TOKEN_KEY=your-token-key
-   
-   # LLM API Configuration (for query generation)
-   OPENAI_API_KEY=your-openai-api-key
-   OPENAI_MODEL=gpt-4
-   OPENAI_BASE_URL=https://api.openai.com/v1
-   
-   # Optional Configuration
-   QUERY_DELAY_SECONDS=0.5
-   ENABLE_PRE_VALIDATION=true
-   REQUEST_DELAY_SECONDS=1.0
-   ```
-
-## Usage
-
-### 🚀 **Quick Start**
-
-**Validate all queries (syntax only)**:
+1. Clone this repository
+2. Install dependencies:
 ```bash
-python evals/validate_cypher_syntax.py
+pip install -r requirements.txt
 ```
 
-**Run full evaluation against BloodHound**:
+3. Set up your API key:
 ```bash
-python evals/make_bh_queries.py
+export OPENAI_API_KEY="your-api-key-here"
 ```
 
-**Generate queries using LLM**:
+## Quick Start
+
+### 1. Generate CoT Traces
+
+Basic usage with your queries:
 ```bash
-python evals/llm_query_generation.py
+python generate_cot_traces.py \
+    --input data/queries.json \
+    --output traces_output.json \
+    --api-key $OPENAI_API_KEY \
+    --model gpt-4 \
+    --max-queries 10
 ```
 
-### 📋 **Detailed Usage**
+### 2. Prepare Training Data
 
-#### **Syntax Validation Only**
+Convert traces to training format:
+```bash
+python prepare_training_data.py \
+    --input traces_output.json \
+    --output-dir training_data \
+    --format all
+```
+
+### 3. Run Examples
+
+See the system in action:
+```bash
+python example_usage.py
+```
+
+## Detailed Usage
+
+### Generating CoT Traces
+
+The main script `generate_cot_traces.py` supports various options:
 
 ```bash
-# Validate entire dataset with summary
-python evals/validate_cypher_syntax.py
-
-# Validate with detailed output for each query
-python evals/validate_cypher_syntax.py --verbose
-
-# Validate a single query
-python evals/validate_cypher_syntax.py --query "MATCH (n:User) RETURN n"
-
-# Validate custom queries file
-python evals/validate_cypher_syntax.py --file /path/to/custom_queries.json
-
-# Skip saving failed queries to file
-python evals/validate_cypher_syntax.py --no-save
+python generate_cot_traces.py \
+    --input data/queries.json \           # Input JSON with queries
+    --output output/traces.json \         # Output file for traces
+    --api-key $OPENAI_API_KEY \          # Your API key
+    --model gpt-4 \                      # Model to use
+    --batch-size 5 \                     # Concurrent requests
+    --max-queries 100 \                  # Limit number of queries
+    --base-url https://api.openai.com/v1 # API endpoint
 ```
 
-#### **Full Query Evaluation**
+#### Supported Models
 
-The main evaluator (`make_bh_queries.py`) automatically includes syntax pre-validation when `ENABLE_PRE_VALIDATION=true` in your `.env` file.
+- `gpt-4` - Best quality traces
+- `gpt-4-turbo` - Faster, good quality
+- `gpt-3.5-turbo` - Fastest, lower quality
+- `o3` - When available (update base-url as needed)
 
-**Features**:
-- ✅ Pre-execution syntax validation (optional)
-- ✅ Live query execution against BloodHound
-- ✅ Comprehensive error handling and classification
-- ✅ Performance metrics and timing statistics
-- ✅ Automatic report generation
+### Input Data Format
 
-#### **LLM Query Generation**
-
-Generate Cypher queries from natural language descriptions using AI:
-
-```bash
-# Generate queries using OpenAI GPT-4 (default)
-python evals/llm_query_generation.py
-
-# Generate without syntax validation
-python evals/llm_query_generation.py --no-validate
-
-# Use custom description and prompt files
-python evals/llm_query_generation.py --descriptions /path/to/descriptions.txt --system-prompt /path/to/prompt.txt
-
-# Don't save results to files
-python evals/llm_query_generation.py --no-save
-
-# Use different LLM provider (when available)
-python evals/llm_query_generation.py --provider openai
-```
-
-**LLM Generation Features**:
-- 🤖 Automatic query generation from descriptions
-- ✅ Built-in syntax validation of generated queries
-- 📊 Comprehensive generation statistics
-- 💾 Saves both raw results and valid queries
-- 🔄 Rate limiting to respect API limits
-- 🎨 Beautiful console output with progress tracking
-
-#### **Programmatic Usage**
-
-```python
-from utils.cypher_validator import validate_query, validate_query_batch
-
-# Validate a single query
-result = validate_query("MATCH (n:User) RETURN n")
-print(f"Valid: {result.ok}, Errors: {result.errors}")
-
-# Validate with Neo4j semantic checking
-result = validate_query(
-    "MATCH (n:User) RETURN n",
-    uri="bolt://localhost:7687",
-    user="neo4j",
-    pwd="password"
-)
-
-# Batch validation
-queries = [
-    {"query": "MATCH (n) RETURN n", "description": "Get all nodes"},
-    {"query": "MATCH (u:User) RETURN u", "description": "Get all users"}
-]
-results = validate_query_batch(queries)
-```
-
-## Output Examples
-
-### **Syntax Validation Results**
-```
-┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━┓
-┃ Validation Type    ┃ Status ┃ Result        ┃     Time ┃
-┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━┩
-│ Syntax (ANTLR)     │   ✓    │ Valid         │  0.003s  │
-│ Semantic (Neo4j)   │   ✓    │ Valid         │  0.045s  │
-│                    │        │               │          │
-│ Overall            │   ✓    │ Valid         │  0.048s  │
-└────────────────────┴────────┴───────────────┴──────────┘
-```
-
-### **Validation Summary**
-```
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┓
-┃ Metric                     ┃    Count ┃ Percentage ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━┩
-│ Total Queries              │      150 │      100.0% │
-│ Syntax Valid               │      147 │       98.0% │
-│ Semantic Valid             │      145 │       96.7% │
-│ Overall Valid              │      145 │       96.7% │
-│                            │          │             │
-│ Average Validation Time    │  0.025s  │             │
-└────────────────────────────┴──────────┴─────────────┘
-```
-
-### **LLM Generation Results**
-```
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┓
-┃ Metric                     ┃    Count ┃ Percentage ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━┩
-│ Total Descriptions         │       31 │      100.0% │
-│ Successful Generations     │       30 │       96.8% │
-│ Generation Errors          │        1 │        3.2% │
-│ Syntax Valid Queries       │       28 │       93.3% │
-│ Syntax Invalid Queries     │        2 │        6.7% │
-│ Syntax Success Rate        │          │       93.3% │
-│ Total Runtime              │  45.2s   │             │
-│ Average Time per Query     │   1.5s   │             │
-└────────────────────────────┴──────────┴─────────────┘
-```
-
-## Configuration Options
-
-### **Environment Variables**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BHE_DOMAIN` | - | BloodHound domain (required) |
-| `BHE_PORT` | `443` | BloodHound port |
-| `BHE_SCHEME` | `https` | Connection scheme |
-| `BHE_TOKEN_ID` | - | API token ID (required) |
-| `BHE_TOKEN_KEY` | - | API token key (required) |
-| `QUERY_DELAY_SECONDS` | `0.5` | Delay between queries |
-| `ENABLE_PRE_VALIDATION` | `true` | Enable syntax pre-validation |
-| `OPENAI_API_KEY` | - | OpenAI API key (for LLM generation) |
-| `OPENAI_MODEL` | `gpt-4` | OpenAI model to use |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI API base URL |
-| `REQUEST_DELAY_SECONDS` | `1.0` | Delay between LLM requests |
-
-### **Query Dataset Format**
-
-The `data/queries.json` file should contain an array of query objects:
-
+Your input JSON should contain an array of objects with:
 ```json
 [
   {
-    "description": "Find all users with SPN",
-    "query": "MATCH (n:User) WHERE n.hasspn=true RETURN n",
-    "source": "https://example.com/cypher-cheatsheet"
+    "description": "Find all domain admins",
+    "query": "MATCH (n:User)-[:MemberOf*1..]->(g:Group {name: \"DOMAIN ADMINS@\"}) RETURN n",
+    "source": "optional-source-url"
   }
 ]
 ```
 
-## Output Files
+### Output Format
 
-### **Generated Reports**
-
-- `failed_queries_YYYY-MM-DD_HH-MM-SS.json` - Execution failures
-- `syntax_failed_queries_YYYY-MM-DD_HH-MM-SS.json` - Syntax validation failures  
-- `syntax_validation_failures_YYYY-MM-DD_HH-MM-SS.json` - Standalone validation failures
-- `llm_generation_results_YYYY-MM-DD_HH-MM-SS.json` - Complete LLM generation results
-- `llm_generated_queries_YYYY-MM-DD_HH-MM-SS.json` - Valid queries from LLM generation
-
-### **Report Structure**
-
+Generated traces include:
 ```json
-{
-  "validation_timestamp": "2024-01-15T10:30:00",
-  "total_queries": 150,
-  "failed_queries_count": 5,
-  "validation_type": "syntax_only",
-  "failed_queries": [
-    {
-      "query_number": 42,
-      "description": "Complex path query",
-      "query": "MATCH (n)-[r*1..5]-(m) RETURN n,r,m",
-      "syntax_errors": ["line 1:15 missing ')' at '-'"],
-      "validation_time": 0.003
-    }
-  ]
-}
+[
+  {
+    "description": "Find all domain admins",
+    "query": "MATCH (n:User)-[:MemberOf*1..]->(g:Group {name: \"DOMAIN ADMINS@\"}) RETURN n",
+    "source": "optional-source-url",
+    "reasoning_trace": "Step 1: Identify the goal...",
+    "generated_at": "2024-01-01T12:00:00"
+  }
+]
 ```
 
-### **LLM Generation Report Structure**
+### Training Data Preparation
 
-```json
-{
-  "evaluation_timestamp": "2024-01-15T10:30:00",
-  "llm_provider": "openai",
-  "llm_model": "gpt-4",
-  "total_descriptions": 31,
-  "successful_generations": 30,
-  "generation_errors": 1,
-  "syntax_validation_enabled": true,
-  "syntax_valid_queries": 28,
-  "syntax_invalid_queries": 2,
-  "total_runtime": 45.2,
-  "generated_queries": [
-    {
-      "description_number": 1,
-      "description": "Find all users with SPN",
-      "raw_response": "<query>MATCH (n:User) WHERE n.hasspn=true RETURN n</query>",
-      "generated_query": "MATCH (n:User) WHERE n.hasspn=true RETURN n",
-      "generation_time": 1.2,
-      "generation_error": null,
-      "syntax_valid": true,
-      "syntax_errors": [],
-      "validation_time": 0.003
-    }
-  ]
-}
+The `prepare_training_data.py` script converts traces into multiple formats:
+
+#### Available Formats
+
+1. **Instruction Format** - For instruction-following models
+2. **Conversation Format** - For chat models
+3. **CoT Format** - For chain-of-thought training
+4. **QA Format** - Simple question-answer pairs
+
+#### Usage
+
+```bash
+python prepare_training_data.py \
+    --input traces_output.json \
+    --output-dir training_data \
+    --format conversation \        # or "all" for all formats
+    --train-ratio 0.8 \           # 80% for training
+    --val-ratio 0.1 \             # 10% for validation
+    --few-shot 3 \                # Number of few-shot examples
+    --seed 42                     # Random seed for reproducibility
 ```
 
-## Dependencies
+#### Output Structure
 
-- **python-dotenv** - Environment variable management
-- **rich** - Beautiful console output and formatting
-- **requests** - HTTP client for API calls
-- **antlr4-python3-runtime** - ANTLR runtime for parsing
-- **antlr4-cypher** - Pre-built Cypher grammar for ANTLR
-- **neo4j** - Neo4j driver for semantic validation (optional)
-- **openai** - OpenAI API client for LLM query generation
+```
+training_data/
+├── train_conversation.json
+├── validation_conversation.json
+├── test_conversation.json
+├── few_shot_examples_conversation.json
+└── training_config_conversation.json
+```
+
+## Advanced Usage
+
+### Custom Prompts
+
+You can customize the prompting strategy by subclassing `CoTTraceGenerator`:
+
+```python
+class CustomCoTGenerator(CoTTraceGenerator):
+    def create_cot_prompt(self, description: str, query: str) -> str:
+        return f"""Custom prompt for {description}
+        
+        Query: {query}
+        
+        Provide reasoning:"""
+```
+
+### Different Models
+
+For different API providers or local models:
+
+```python
+# For local models
+generator = CoTTraceGenerator(
+    api_key="dummy",
+    model="local-model",
+    base_url="http://localhost:8000/v1"
+)
+
+# For other providers
+generator = CoTTraceGenerator(
+    api_key="your-key",
+    model="claude-3",
+    base_url="https://api.anthropic.com/v1"
+)
+```
+
+### Batch Processing
+
+For large datasets, use batch processing:
+
+```python
+async with CoTTraceGenerator(api_key, model="gpt-4") as generator:
+    results = await generator.process_batch(
+        queries, 
+        batch_size=10  # Adjust based on rate limits
+    )
+```
+
+## Configuration
+
+Edit `config.yaml` to customize:
+
+```yaml
+generation:
+  batch_size: 5
+  max_retries: 3
+  temperature: 0.7
+  max_tokens: 2000
+
+filtering:
+  min_description_length: 10
+  max_queries: null
+```
+
+## Training Your Model
+
+After preparing training data, you can train a smaller model:
+
+1. **Choose a base model** (e.g., GPT-2, T5, or a smaller transformer)
+2. **Use the generated training data** in your preferred training framework
+3. **Follow the suggested parameters** from `training_config_*.json`
+
+Example training configurations are provided in the output files.
+
+## Tips for Better Results
+
+### Prompt Engineering
+- Customize prompts for your specific domain
+- Include examples of good reasoning in your prompts
+- Adjust temperature based on desired creativity vs consistency
+
+### Data Quality
+- Filter out low-quality traces before training
+- Manually review a sample of generated traces
+- Consider multiple models for diverse reasoning styles
+
+### Model Selection
+- Use GPT-4 for highest quality traces
+- Use GPT-3.5-turbo for faster iteration
+- Consider o3 when available for even better reasoning
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Rate Limiting**
+   - Reduce batch size
+   - Increase delays between requests
+   - Use exponential backoff (built-in)
+
+2. **Poor Quality Traces**
+   - Improve prompts
+   - Use a better model
+   - Filter input data more strictly
+
+3. **API Errors**
+   - Check API key validity
+   - Verify model availability
+   - Check rate limits and quotas
+
+### Logging
+
+Check `cot_generation.log` for detailed logs:
+```bash
+tail -f cot_generation.log
+```
+
+## Examples
+
+See `example_usage.py` for complete examples including:
+- Basic trace generation
+- Multiple model comparison
+- Custom prompt strategies
+- Error handling
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Add your improvements
-4. Ensure all validation tests pass
-5. Submit a pull request
+To extend this system:
+1. Add new output formats in `TrainingDataProcessor`
+2. Implement new model providers in `CoTTraceGenerator`
+3. Add domain-specific prompt templates
+4. Improve data filtering and quality checks
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - see LICENSE file for details.
+
+## Citation
+
+If you use this system in your research, please cite:
+
+```bibtex
+@software{cot_trace_generator,
+  title={Chain-of-Thought Trace Generator for Model Distillation},
+  author={Your Name},
+  year={2024},
+  url={https://github.com/your-repo}
+}
+```
