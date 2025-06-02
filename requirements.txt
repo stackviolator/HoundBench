@@ -1,8 +1,8 @@
 python-dotenv
 rich
 requests
-antlr4-python3-runtime
-antlr4-cypher
+antlr4-python3-runtime==4.13.2
+antlr4-cypher==0.1.2
 neo4j
 openai
 arize-phoenix-otel
