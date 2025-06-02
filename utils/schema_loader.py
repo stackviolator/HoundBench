@@ -28,14 +28,15 @@ except ImportError:
 # Initialize Rich Console
 console = Console()
 
+# Load environment variables
+load_dotenv()
+
 # Neo4j Configuration from environment variables
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_SECRET", "bloodhoundcommunityedition")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "bloodhoundcommunityedition")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 
-# Load environment variables
-load_dotenv()
 
 class SchemaLoader:
     """Neo4j schema extraction utility."""
@@ -263,11 +264,6 @@ def test_schema_connection(uri: str = None, user: str = None, password: str = No
     Returns:
         Tuple of (success, message)
     """
-
-    print(f"uri: {uri}")
-    print(f"user: {user}")
-    print(f"password: {password}")
-    print(f"database: {database}")
     try:
         loader = SchemaLoader(uri, user, password, database)
         if loader.connect():

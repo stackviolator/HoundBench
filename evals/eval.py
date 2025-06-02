@@ -23,6 +23,7 @@ import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.cypher_validator import validate_query, ValidationResult
 from utils.schema_loader import load_schema, test_schema_connection
+from utils.query_executor import QueryExecutor, test_connection as test_query_executor_connection
 from utils.dataset_utils import (
     load_queries_dataset, 
     split_dataset, 
@@ -55,6 +56,11 @@ SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.8"))
 EXACT_MATCH_WEIGHT = float(os.getenv("EXACT_MATCH_WEIGHT", "0.4"))
 TOKEN_SIMILARITY_WEIGHT = float(os.getenv("TOKEN_SIMILARITY_WEIGHT", "0.3"))
 STRUCTURAL_SIMILARITY_WEIGHT = float(os.getenv("STRUCTURAL_SIMILARITY_WEIGHT", "0.3"))
+
+# Result comparison configuration
+ENABLE_RESULT_COMPARISON = os.getenv("ENABLE_RESULT_COMPARISON", "true").lower() == "true"
+RESULT_FUZZY_THRESHOLD = float(os.getenv("RESULT_FUZZY_THRESHOLD", "0.8"))
+RESULT_COMPARISON_TIMEOUT = float(os.getenv("RESULT_COMPARISON_TIMEOUT", "30.0"))  # seconds
 
 # Neo4j Configuration for schema loading
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
@@ -219,7 +225,13 @@ def generate_queries_from_test_set(
     llm_client: LLMClient,
     validate_syntax: bool = True,
     save_results: bool = True,
-    similarity_threshold: float = SIMILARITY_THRESHOLD
+    similarity_threshold: float = SIMILARITY_THRESHOLD,
+    enable_result_comparison: bool = ENABLE_RESULT_COMPARISON,
+    result_fuzzy_threshold: float = RESULT_FUZZY_THRESHOLD,
+    neo4j_uri: str = NEO4J_URI,
+    neo4j_user: str = NEO4J_USER,
+    neo4j_password: str = NEO4J_PASSWORD,
+    neo4j_database: str = NEO4J_DATABASE
 ) -> Dict[str, Any]:
     """Generate Cypher queries for test set descriptions and evaluate against ground truth."""
     
@@ -236,6 +248,14 @@ def generate_queries_from_test_set(
     low_similarity_count = 0
     similarity_scores = []
     
+    # Result comparison metrics
+    result_comparison_enabled = enable_result_comparison
+    result_strict_matches = 0
+    result_fuzzy_matches = 0
+    result_comparison_failures = 0
+    result_comparison_scores = []
+    query_executor = None
+    
     console.print(Panel(
         f"[bold cyan]HoundBench Evaluation[/bold cyan]\n"
         f"Test Cases: [yellow]{total_test_cases}[/yellow]\n"
@@ -244,10 +264,28 @@ def generate_queries_from_test_set(
         f"Temperature: [cyan]{llm_client.temperature}[/cyan]\n"
         f"Max Tokens: [cyan]{llm_client.max_tokens}[/cyan]\n"
         f"Syntax Validation: [{'green]Enabled[/green]' if validate_syntax else 'yellow]Disabled[/yellow]'}\n"
-        f"Similarity Threshold: [cyan]{similarity_threshold}[/cyan]",
+        f"Result Comparison: [{'green]Enabled[/green]' if result_comparison_enabled else 'yellow]Disabled[/yellow]'}\n"
+        f"Similarity Threshold: [cyan]{similarity_threshold}[/cyan]" +
+        (f"\nResult Fuzzy Threshold: [cyan]{result_fuzzy_threshold}[/cyan]" if result_comparison_enabled else ""),
         title="Evaluation Configuration",
         border_style="blue"
     ))
+    
+    # Initialize query executor if result comparison is enabled
+    if result_comparison_enabled:
+        console.print("[dim]Initializing Neo4j query executor for result comparison...[/dim]")
+        try:
+            query_executor = QueryExecutor(neo4j_uri, neo4j_user, neo4j_password, neo4j_database)
+            if not query_executor.connect():
+                console.print("[yellow]⚠[/yellow] Failed to connect to Neo4j. Result comparison will be disabled.")
+                result_comparison_enabled = False
+                query_executor = None
+            else:
+                console.print("[green]✓[/green] Neo4j connection established for result comparison")
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Failed to initialize query executor: {e}. Result comparison will be disabled.")
+            result_comparison_enabled = False
+            query_executor = None
     
     overall_start_time = time.monotonic()
     
@@ -310,7 +348,9 @@ def generate_queries_from_test_set(
                         "generation_error": generated_query,
                         "syntax_valid": False,
                         "syntax_errors": ["Generation failed"],
-                        "similarity_evaluation": None
+                        "similarity_evaluation": None,
+                        "result_comparison": None,
+                        "result_comparison_time": 0
                     }
                 else:
                     # Display generated query
@@ -399,6 +439,108 @@ def generate_queries_from_test_set(
                             subtitle=f"Token: {similarity_result['token_similarity']:.3f} | Structural: {similarity_result['structural_similarity']:.3f} | Took {similarity_time:.3f}s"
                         ))
                     
+                    # Result comparison evaluation (if enabled and syntax is valid)
+                    result_comparison = None
+                    result_comparison_time = 0
+                    
+                    if result_comparison_enabled and query_executor and syntax_valid:
+                        console.print("[dim]Comparing query results against database...[/dim]")
+                        result_comparison_start = time.monotonic()
+                        
+                        try:
+                            # Execute ground truth query
+                            gt_result = query_executor.execute_query(ground_truth_query, show_progress=False)
+                            
+                            # Only proceed if ground truth query returns data
+                            if gt_result.success and gt_result.record_count > 0:
+                                # Execute generated query
+                                gen_result = query_executor.execute_query(generated_query, show_progress=False)
+                                
+                                # Only compare if generated query also returns data (not 404)
+                                if gen_result.success and gen_result.record_count > 0:
+                                    # Compare results
+                                    result_comparison = query_executor.compare_results(
+                                        gt_result, gen_result, fuzzy_threshold=result_fuzzy_threshold
+                                    )
+                                    
+                                    result_comparison_time = time.monotonic() - result_comparison_start
+                                    result_comparison_scores.append(result_comparison.similarity_score)
+                                    
+                                    # Update counters
+                                    if result_comparison.strict_match:
+                                        result_strict_matches += 1
+                                        console.print(Panel(
+                                            Text("✓ Strict result match! Generated query returns identical data.", style="bold green"),
+                                            title="Result Comparison",
+                                            border_style="green",
+                                            subtitle=f"GT: {result_comparison.ground_truth_count} records | Gen: {result_comparison.generated_count} records | Score: {result_comparison.similarity_score:.3f} | Took {result_comparison_time:.3f}s"
+                                        ))
+                                    elif result_comparison.fuzzy_match:
+                                        result_fuzzy_matches += 1
+                                        console.print(Panel(
+                                            Text(f"✓ Fuzzy result match (score: {result_comparison.similarity_score:.3f})", style="bold yellow"),
+                                            title="Result Comparison",
+                                            border_style="yellow",
+                                            subtitle=f"GT: {result_comparison.ground_truth_count} records | Gen: {result_comparison.generated_count} records | Common: {result_comparison.common_records} | Missing: {result_comparison.missing_records} | Extra: {result_comparison.extra_records} | Took {result_comparison_time:.3f}s"
+                                        ))
+                                    else:
+                                        console.print(Panel(
+                                            Text(f"✗ Result mismatch (score: {result_comparison.similarity_score:.3f})", style="bold red"),
+                                            title="Result Comparison",
+                                            border_style="red",
+                                            subtitle=f"GT: {result_comparison.ground_truth_count} records | Gen: {result_comparison.generated_count} records | Common: {result_comparison.common_records} | Missing: {result_comparison.missing_records} | Extra: {result_comparison.extra_records} | Took {result_comparison_time:.3f}s"
+                                        ))
+                                
+                                elif gen_result.success and gen_result.record_count == 0:
+                                    console.print(Panel(
+                                        Text("Generated query returned no data (404). Skipping result comparison.", style="dim"),
+                                        title="Result Comparison",
+                                        border_style="dim"
+                                    ))
+                                    result_comparison_time = time.monotonic() - result_comparison_start
+                                
+                                else:
+                                    result_comparison_failures += 1
+                                    console.print(Panel(
+                                        Text(f"Generated query failed: {gen_result.error}", style="bold red"),
+                                        title="Result Comparison Error",
+                                        border_style="red"
+                                    ))
+                                    result_comparison_time = time.monotonic() - result_comparison_start
+                            
+                            elif gt_result.success and gt_result.record_count == 0:
+                                console.print(Panel(
+                                    Text("Ground truth query returned no data. Skipping result comparison.", style="dim"),
+                                    title="Result Comparison",
+                                    border_style="dim"
+                                ))
+                                result_comparison_time = time.monotonic() - result_comparison_start
+                            
+                            else:
+                                result_comparison_failures += 1
+                                console.print(Panel(
+                                    Text(f"Ground truth query failed: {gt_result.error}", style="bold red"),
+                                    title="Result Comparison Error",
+                                    border_style="red"
+                                ))
+                                result_comparison_time = time.monotonic() - result_comparison_start
+                        
+                        except Exception as e:
+                            result_comparison_failures += 1
+                            result_comparison_time = time.monotonic() - result_comparison_start
+                            console.print(Panel(
+                                Text(f"Result comparison failed: {str(e)}", style="bold red"),
+                                title="Result Comparison Error",
+                                border_style="red"
+                            ))
+                    
+                    elif result_comparison_enabled and not syntax_valid:
+                        console.print(Panel(
+                            Text("Skipping result comparison due to syntax validation failure.", style="dim"),
+                            title="Result Comparison",
+                            border_style="dim"
+                        ))
+                    
                     query_result = {
                         "test_case_number": i + 1,
                         "description": description,
@@ -411,7 +553,9 @@ def generate_queries_from_test_set(
                         "syntax_errors": syntax_errors,
                         "validation_time": validation_time,
                         "similarity_evaluation": similarity_result,
-                        "similarity_time": similarity_time
+                        "similarity_time": similarity_time,
+                        "result_comparison": result_comparison,
+                        "result_comparison_time": result_comparison_time
                     }
                 
                 generated_queries.append(query_result)
@@ -436,7 +580,9 @@ def generate_queries_from_test_set(
                     "generation_error": str(e),
                     "syntax_valid": False,
                     "syntax_errors": ["Generation failed with exception"],
-                    "similarity_evaluation": None
+                    "similarity_evaluation": None,
+                    "result_comparison": None,
+                    "result_comparison_time": 0
                 }
                 generated_queries.append(query_result)
             
@@ -449,9 +595,14 @@ def generate_queries_from_test_set(
     overall_end_time = time.monotonic()
     total_runtime = overall_end_time - overall_start_time
     
+    # Close query executor if it was used
+    if query_executor:
+        query_executor.close()
+    
     # Calculate statistics
     successful_generations = total_test_cases - generation_errors
     avg_similarity_score = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+    avg_result_comparison_score = sum(result_comparison_scores) / len(result_comparison_scores) if result_comparison_scores else 0.0
     
     results = {
         "evaluation_timestamp": datetime.now().isoformat(),
@@ -469,6 +620,12 @@ def generate_queries_from_test_set(
         "medium_similarity_count": medium_similarity_count,
         "low_similarity_count": low_similarity_count,
         "average_similarity_score": avg_similarity_score,
+        "result_comparison_enabled": result_comparison_enabled,
+        "result_fuzzy_threshold": result_fuzzy_threshold,
+        "result_strict_matches": result_strict_matches,
+        "result_fuzzy_matches": result_fuzzy_matches,
+        "result_comparison_failures": result_comparison_failures,
+        "average_result_comparison_score": avg_result_comparison_score,
         "total_runtime": total_runtime,
         "generated_queries": generated_queries
     }
@@ -545,6 +702,31 @@ def display_summary_statistics(results: Dict[str, Any]):
                         results["total_test_cases"]) * 100
         stats_table.add_row("Accuracy Rate (Exact + High)", f"{accuracy_rate:.1f}%")
         stats_table.add_row("Average Similarity Score", f"{results['average_similarity_score']:.3f}")
+    
+    # Add result comparison statistics if enabled
+    if results.get("result_comparison_enabled", False):
+        stats_table.add_row("", "")  # Separator
+        stats_table.add_row(
+            Text("Result Strict Matches", style="green"),
+            Text(str(results.get("result_strict_matches", 0)), style="green")
+        )
+        stats_table.add_row(
+            Text("Result Fuzzy Matches", style="yellow"),
+            Text(str(results.get("result_fuzzy_matches", 0)), style="yellow")
+        )
+        stats_table.add_row(
+            Text("Result Comparison Failures", style="red"),
+            Text(str(results.get("result_comparison_failures", 0)), style="red")
+        )
+        
+        if results.get("result_strict_matches", 0) + results.get("result_fuzzy_matches", 0) > 0:
+            result_accuracy_rate = ((results.get("result_strict_matches", 0) + results.get("result_fuzzy_matches", 0)) / 
+                                  results["total_test_cases"]) * 100
+            stats_table.add_row("Result Accuracy Rate (Strict + Fuzzy)", f"{result_accuracy_rate:.1f}%")
+        
+        avg_result_score = results.get("average_result_comparison_score", 0.0)
+        if avg_result_score > 0:
+            stats_table.add_row("Average Result Comparison Score", f"{avg_result_score:.3f}")
     
     stats_table.add_row("Total Runtime", f"{results['total_runtime']:.2f} seconds")
     
@@ -739,6 +921,16 @@ Examples:
   
   # Use different Neo4j database
   python eval.py --neo4j-database bloodhound
+  
+  # Result Comparison Configuration:
+  # Disable result comparison evaluation
+  python eval.py --no-result-comparison
+  
+  # Use custom fuzzy threshold for result matching
+  python eval.py --result-fuzzy-threshold 0.9
+  
+  # Full evaluation with result comparison
+  python eval.py --neo4j-uri bolt://localhost:7687 --neo4j-user neo4j --neo4j-password mypass
         """
     )
     
@@ -871,6 +1063,20 @@ Examples:
         help="Disable automatic schema loading and inclusion in system prompt"
     )
     
+    # Result Comparison Configuration
+    parser.add_argument(
+        "--no-result-comparison",
+        action="store_true",
+        help="Disable result comparison evaluation against the database"
+    )
+    
+    parser.add_argument(
+        "--result-fuzzy-threshold",
+        type=float,
+        default=RESULT_FUZZY_THRESHOLD,
+        help=f"Threshold for fuzzy result matching (default: {RESULT_FUZZY_THRESHOLD})"
+    )
+    
     args = parser.parse_args()
     
     # Validate arguments
@@ -880,6 +1086,10 @@ Examples:
     
     if not 0 <= args.similarity_threshold <= 1:
         console.print("[red]Error: similarity-threshold must be between 0 and 1[/red]")
+        return
+    
+    if not 0 <= args.result_fuzzy_threshold <= 1:
+        console.print("[red]Error: result-fuzzy-threshold must be between 0 and 1[/red]")
         return
     
     if args.test_ratio != 0.15 and not args.split_dataset:
@@ -976,7 +1186,13 @@ Examples:
         llm_client=llm_client,
         validate_syntax=not args.no_validate,
         save_results=not args.no_save,
-        similarity_threshold=args.similarity_threshold
+        similarity_threshold=args.similarity_threshold,
+        enable_result_comparison=not args.no_result_comparison,
+        result_fuzzy_threshold=args.result_fuzzy_threshold,
+        neo4j_uri=args.neo4j_uri,
+        neo4j_user=args.neo4j_user,
+        neo4j_password=args.neo4j_password,
+        neo4j_database=args.neo4j_database
     )
     
     # Final summary
